@@ -1,0 +1,53 @@
+rule_version: "2026.09.1"
+
+contribution:
+  total_rate: 0.05
+  employer_rate: 0.04
+  worker_rate: 0.01
+  wage_cap: 12_000_000      # Rp 12 juta — potongan pekerja maks Rp 120.000
+  wage_floor: umk            # diambil dari tabel region per kab/kota
+
+tolerance:
+  absolute_idr: 1000         # toleransi absolut Rp 1.000
+  relative: 0.02             # toleransi relatif 2% — pakai mana yang lebih besar
+
+escalation:
+  min_independent_reports: 2  # k: minimum laporan pekerja independen
+  require_data_anomaly: true  # eskalasi butuh JUGA anomali data
+  data_only_risk_threshold: 80  # skor data-only ≥ ini boleh eskalasi tanpa laporan
+
+scoring:
+  weights:
+    rule: 0.7
+    anomaly: 0.3
+  # Bobot per sinyal C (rule score)
+  signal_weights:
+    C1_under_reporting: 25
+    C2_headcount_gap: 20
+    C3_remit_inconsistent: 25
+    C4_uniform_wage: 10
+    C5_churn: 10
+    C6_worker_reports: 10
+
+planner:
+  explore_share: 0.20         # 20% slot "eksplorasi" (skor sedang, acak terbobot)
+  default_visit_hours: 3.0    # jam estimasi per kunjungan
+  urgency_increment_per_day: 0.05  # urgency bertambah per hari kasus menunggu
+
+rate_limit:
+  slip_checks_per_hour: 10   # per worker_hash
+
+retention:
+  worker_report_months: 12
+  audit_months: 24
+
+morning_message:
+  schedule_time: "07:30"     # zona waktu petugas (WIB default)
+  timezone: "Asia/Jakarta"
+  max_cases_in_message: 5
+
+# Threshold klasifikasi label risiko (untuk display)
+risk_labels:
+  high: 70
+  medium: 40
+  # < 40 = low

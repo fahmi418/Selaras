@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — Lab Verifikasi Slip Gaji Pekerja</title>
+  
+  <!-- Fonts: Inter Tight & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- CSS Tokens & Components -->
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+
+  <style>
+    .split-layout {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: var(--space-32);
+      min-height: calc(100vh - 64px);
+    }
+    @media (max-width: 900px) {
+      .split-layout {
+        grid-template-columns: 1fr;
+        gap: var(--space-20);
+      }
+    }
+    .hero-structural {
+      background-color: var(--color-deep-teal);
+      color: var(--color-paper);
+      border-radius: var(--radius-xl);
+      padding: var(--space-40) var(--space-32);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .scenario-btn {
+      text-align: left;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      background-color: var(--color-bone);
+      border: 1px solid var(--color-mist);
+      font-size: var(--text-small);
+      cursor: pointer;
+      transition: all var(--transition-fast);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .scenario-btn:hover {
+      background-color: #e5e8ea;
+      border-color: var(--color-deep-teal);
+    }
+    .scenario-btn.active {
+      background-color: rgba(46, 206, 160, 0.1);
+      border-color: var(--color-mint-pulse);
+    }
+    .result-box {
+      border: 1px solid var(--color-mist);
+      border-radius: var(--radius-lg);
+      padding: var(--space-20);
+      background-color: var(--color-paper);
+      margin-top: var(--space-20);
+      display: none;
+      animation: fadeIn 250ms ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="app-navbar">
+    <div class="nav-container">
+      <a href="/portal" class="nav-brand">
+        <span class="icon icon-md" style="color: var(--color-mint-pulse);">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        </span>
+        SELARAS
+        <span class="brand-badge">LAB UJI</span>
+      </a>
+
+      <nav>
+        <ul class="nav-links">
+          <li>
+            <a href="/portal" class="nav-link">
+              <span class="icon icon-sm"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span>
+              Antrean Kunjungan
+            </a>
+          </li>
+          <li>
+            <a href="/verify" class="nav-link active">
+              <span class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg></span>
+              Lab Verifikasi Slip
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Split View Body -->
+  <main class="page-container" style="padding-top: var(--space-20); padding-bottom: var(--space-40);">
+    <div class="split-layout">
+      
+      <!-- Left Column: Structural Dark Teal (DESIGN.md Split Hero) -->
+      <div class="hero-structural">
+        <div>
+          <span class="badge badge-mint" style="background: rgba(46, 206, 160, 0.2); color: var(--color-mint-pulse); border-color: rgba(46, 206, 160, 0.4); margin-bottom: var(--space-16);">
+            RULE ENGINE DETERMINISTIK
+          </span>
+
+          <h1 style="font-size: var(--text-heading); font-weight: var(--font-semibold); line-height: 1.2; margin-bottom: var(--space-16); color: var(--color-paper);">
+            Uji Keselarasan Potongan Iuran JKN BPJS Kesehatan
+          </h1>
+
+          <p style="font-size: var(--text-body); color: rgba(255, 255, 255, 0.82); line-height: 1.6; margin-bottom: var(--space-24);">
+            Sistem membandingkan komponen upah riil pekerja dengan catatan kepesertaan terdaftar serta patokan upah wilayah secara matematis deterministik tanpa bias LLM.
+          </p>
+
+          <div style="background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-lg); padding: var(--space-16); margin-bottom: var(--space-20);">
+            <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: var(--space-8);">
+              Formula & Dasar Aturan (Perpres 82/2018)
+            </div>
+            <ul style="list-style: none; font-size: var(--text-small); color: rgba(255, 255, 255, 0.85); display: flex; flex-direction: column; gap: var(--space-8);">
+              <li style="display: flex; gap: 8px;">
+                <span class="icon icon-xs" style="color: var(--color-mint-pulse);"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
+                <span><strong>Dasar Upah:</strong> Gaji Pokok + Tunjangan Tetap (dibatasi UMK s/d Rp12.000.000).</span>
+              </li>
+              <li style="display: flex; gap: 8px;">
+                <span class="icon icon-xs" style="color: var(--color-mint-pulse);"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
+                <span><strong>Porsi Pekerja (1%):</strong> Dipotong langsung dari slip gaji.</span>
+              </li>
+              <li style="display: flex; gap: 8px;">
+                <span class="icon icon-xs" style="color: var(--color-mint-pulse);"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
+                <span><strong>Porsi Pemberi Kerja (4%):</strong> Wajib disetor ke kas BPJS Kesehatan.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Privacy & PDP Guarantee Banner -->
+        <div style="border-top: 1px solid rgba(255, 255, 255, 0.15); padding-top: var(--space-16); font-size: 12px; color: rgba(255, 255, 255, 0.65); line-height: 1.5;">
+          <div style="display: flex; align-items: center; gap: 6px; color: var(--color-soft-teal); font-weight: var(--font-semibold); margin-bottom: 4px;">
+            <span class="icon icon-xs"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>
+            Jaminan Privasi UU PDP No. 27/2022
+          </div>
+          Data verifikasi slip diolah tanpa menyimpan identitas nama maupun NIK. Hasil ekstraksi disimpan dalam bentuk agregat terpseudonimkan.
+        </div>
+      </div>
+
+      <!-- Right Column: Interactive Verification Form & Verdict Card -->
+      <div>
+        <div class="card" style="padding: var(--space-24);">
+          
+          <div class="card-title-row">
+            <span class="card-title">
+              <span class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>
+              Pilih Skenario Contoh Uji Cepat
+            </span>
+          </div>
+
+          <!-- Scenario Presets -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-8); margin-bottom: var(--space-20);">
+            <button type="button" class="scenario-btn active" data-preset="modus2">
+              <strong style="color: var(--color-ink);">Modus #2: Under-reporting Upah</strong>
+              <span style="color: var(--color-slate); font-size: 11px;">Gaji Rp5.5jt, potongan di slip Rp30rb</span>
+            </button>
+            <button type="button" class="scenario-btn" data-preset="modus3">
+              <strong style="color: var(--color-ink);">Modus #3: Penggelapan Iuran</strong>
+              <span style="color: var(--color-slate); font-size: 11px;">Gaji dipotong 1%, setoran nihil</span>
+            </button>
+            <button type="button" class="scenario-btn" data-preset="modus1">
+              <strong style="color: var(--color-ink);">Modus #1: Pendaftaran Sebagian</strong>
+              <span style="color: var(--color-slate); font-size: 11px;">Pekerja aktif belum terdaftar di BPJS</span>
+            </button>
+            <button type="button" class="scenario-btn" data-preset="patuh">
+              <strong style="color: var(--color-ink);">Slip Patuh / Selaras</strong>
+              <span style="color: var(--color-slate); font-size: 11px;">Potongan 1% tepat sesuai dasar upah</span>
+            </button>
+          </div>
+
+          <!-- Form Fields -->
+          <form id="verify-form">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12);">
+              <div class="form-group">
+                <label class="form-label" for="base_wage">Gaji Pokok (Rp) *</label>
+                <input type="number" id="base_wage" class="form-control" value="5000000" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="allowance">Tunjangan Tetap (Rp)</label>
+                <input type="number" id="allowance" class="form-control" value="500000">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12);">
+              <div class="form-group">
+                <label class="form-label" for="deduction">Potongan BPJS di Slip (Rp) *</label>
+                <input type="number" id="deduction" class="form-control" value="30000" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="recorded_wage">Upah Terdaftar BPJS (Rp)</label>
+                <input type="number" id="recorded_wage" class="form-control" value="3000000">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-12);">
+              <div class="form-group">
+                <label class="form-label" for="umk">UMK Wilayah Patokan (Rp)</label>
+                <input type="number" id="umk" class="form-control" value="3300000">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="is_registered">Status Kepesertaan Pekerja</label>
+                <select id="is_registered" class="form-control">
+                  <option value="true" selected>Terdaftar di BPJS Kesehatan</option>
+                  <option value="false">Belum Terdaftar (Tidak Ditemukan)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="is_remitted">Status Penyetoran Perusahaan ke Kas</label>
+              <select id="is_remitted" class="form-control">
+                <option value="true" selected>Disetorkan Rutin</option>
+                <option value="false">Tidak Disetor (Ada Tunggakan)</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 14px 24px; font-size: 16px;">
+              <span class="icon icon-sm"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg></span>
+              Evaluasi Keselarasan Slip Gaji
+            </button>
+          </form>
+
+          <!-- Result Presentation Box -->
+          <div id="result-box" class="result-box">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-12);">
+              <span class="card-title">Hasil Analisis Rule Engine</span>
+              <div id="verdict-badges" style="display: flex; gap: 6px; flex-wrap: wrap;"></div>
+            </div>
+
+            <p id="result-explanation" style="font-size: var(--text-body); color: var(--color-ink); line-height: 1.5; margin-bottom: var(--space-16);"></p>
+
+            <div class="table-wrap">
+              <table class="table-triangulation">
+                <thead>
+                  <tr>
+                    <th>Parameter Analisis</th>
+                    <th class="col-numeric">Nilai Terhitung</th>
+                  </tr>
+                </thead>
+                <tbody id="result-table-body">
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+
+            <div style="margin-top: var(--space-16); padding-top: var(--space-12); border-top: 1px solid var(--color-mist); display: flex; justify-content: flex-end;">
+              <button id="btn-report-anonymous" class="btn btn-sm btn-secondary">
+                <span class="icon icon-xs"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg></span>
+                Ajukan Laporan Terverifikasi Anonim
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Verification Script -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const presets = {
+        modus2: { base_wage: 5000000, allowance: 500000, deduction: 30000, recorded_wage: 3000000, umk: 3300000, is_registered: 'true', is_remitted: 'true' },
+        modus3: { base_wage: 4500000, allowance: 0, deduction: 45000, recorded_wage: 4500000, umk: 3300000, is_registered: 'true', is_remitted: 'false' },
+        modus1: { base_wage: 4200000, allowance: 0, deduction: 42000, recorded_wage: 0, umk: 3300000, is_registered: 'false', is_remitted: 'true' },
+        patuh: { base_wage: 4500000, allowance: 500000, deduction: 50000, recorded_wage: 5000000, umk: 3300000, is_registered: 'true', is_remitted: 'true' }
+      };
+
+      const presetBtns = document.querySelectorAll('.scenario-btn');
+      presetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          presetBtns.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const data = presets[btn.getAttribute('data-preset')];
+          if (data) {
+            document.getElementById('base_wage').value = data.base_wage;
+            document.getElementById('allowance').value = data.allowance;
+            document.getElementById('deduction').value = data.deduction;
+            document.getElementById('recorded_wage').value = data.recorded_wage;
+            document.getElementById('umk').value = data.umk;
+            document.getElementById('is_registered').value = data.is_registered;
+            document.getElementById('is_remitted').value = data.is_remitted;
+          }
+        });
+      });
+
+      const form = document.getElementById('verify-form');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const baseWage = Number(document.getElementById('base_wage').value) || 0;
+        const allowance = Number(document.getElementById('allowance').value) || 0;
+        const actualDeduction = Number(document.getElementById('deduction').value) || 0;
+        const recordedWage = Number(document.getElementById('recorded_wage').value) || 0;
+        const umk = Number(document.getElementById('umk').value) || 3000000;
+        const isRegistered = document.getElementById('is_registered').value === 'true';
+        const isRemitted = document.getElementById('is_remitted').value === 'true';
+
+        // Prepare synthetic PayslipExtraction format
+        const extraction = {
+          base_wage: { value: baseWage, confidence: 1.0 },
+          fixed_allowances: allowance ? [{ label: "Tunjangan Tetap", amount: allowance, confidence: 1.0 }] : [],
+          variable_allowances: [],
+          deductions: [{ label: "BPJS Kesehatan", amount: actualDeduction, confidence: 1.0 }],
+          net_wage: { value: baseWage + allowance - actualDeduction, confidence: 1.0 },
+          company_name: { value: "PT Uji Skenario", confidence: 1.0 },
+          period: { value: "2026-09", confidence: 1.0 }
+        };
+
+        const payload = {
+          extraction: extraction,
+          company_id: "demo-company",
+          umk: umk,
+          recorded_wage_base: recordedWage || null,
+          is_remitted: isRemitted,
+          is_registered: isRegistered
+        };
+
+        try {
+          // Client-side rule engine evaluation for offline/instant demo, or call backend /api/slip/verify
+          const res = await fetch('/api/slip/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-API-Key': 'internal-dev-key-12345' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!res.ok) {
+            throw new Error('Gagal mengevaluasi slip via API.');
+          }
+
+          const result = await res.json();
+          renderVerdictResult(result, baseWage + allowance);
+        } catch (err) {
+          // Fallback calculation directly in JS for instant feedback
+          const totalWage = Math.max(baseWage + allowance, umk);
+          const cappedWage = Math.min(totalWage, 12000000);
+          const expected = Math.round(0.01 * cappedWage);
+          const verdicts = [];
+
+          if (!isRegistered) verdicts.push("NOT_REGISTERED");
+          else if (!isRemitted) verdicts.push("NOT_REMITTED");
+          else if (actualDeduction < expected - 1000) verdicts.push("DEDUCTION_LOW");
+          else if (actualDeduction > expected + 1000) verdicts.push("DEDUCTION_HIGH");
+          else verdicts.push("OK");
+
+          if (recordedWage && Math.abs(recordedWage - totalWage) > 10000) {
+            verdicts.push("WAGE_BASE_MISMATCH");
+          }
+
+          renderVerdictResult({
+            verdicts: verdicts,
+            expected_deduction: expected,
+            actual_deduction: actualDeduction,
+            implied_wage_base: actualDeduction * 100,
+            wage_base_used: cappedWage,
+            explanation: verdicts.includes("OK") ? "Potongan iuran sesuai regulasi 1% dasar upah." : "Terdeteksi selisih perhitungan iuran dengan dasar upah sebenarnya."
+          }, totalWage);
+        }
+      });
+
+      function renderVerdictResult(data, totalWage) {
+        const box = document.getElementById('result-box');
+        box.style.display = 'block';
+
+        const badgeContainer = document.getElementById('verdict-badges');
+        badgeContainer.innerHTML = '';
+        data.verdicts.forEach(v => {
+          const b = document.createElement('span');
+          if (v === 'OK') {
+            b.className = 'badge badge-mint';
+            b.textContent = 'OK: SELARAS';
+          } else if (v.includes('LOW') || v.includes('NOT')) {
+            b.className = 'badge badge-red';
+            b.textContent = v;
+          } else {
+            b.className = 'badge badge-orange';
+            b.textContent = v;
+          }
+          badgeContainer.appendChild(b);
+        });
+
+        document.getElementById('result-explanation').textContent = data.explanation;
+
+        const tbody = document.getElementById('result-table-body');
+        const fmt = (n) => `Rp ${new Intl.NumberFormat('id-ID').format(n || 0)}`;
+
+        tbody.innerHTML = `
+          <tr>
+            <td>Dasar Upah Riil Terhitung</td>
+            <td class="col-numeric">${fmt(data.wage_base_used)}</td>
+          </tr>
+          <tr>
+            <td>Ekspektasi Potongan Pekerja (1%)</td>
+            <td class="col-numeric">${fmt(data.expected_deduction)}</td>
+          </tr>
+          <tr>
+            <td>Potongan Nyata pada Slip</td>
+            <td class="col-numeric" style="color: ${data.actual_deduction < data.expected_deduction ? 'var(--color-danger)' : 'inherit'}; font-weight: 600;">
+              ${fmt(data.actual_deduction)}
+            </td>
+          </tr>
+          <tr class="row-diff">
+            <td><strong>Selisih Potongan per Bulan</strong></td>
+            <td class="col-numeric diff-tag-negative">
+              ${fmt(Math.abs(data.expected_deduction - data.actual_deduction))}
+            </td>
+          </tr>
+        `;
+
+        box.scrollIntoView({ behavior: 'smooth' });
+      }
+
+      document.getElementById('btn-report-anonymous').addEventListener('click', () => {
+        alert('Laporan anonim Anda berhasil tercatat dalam sistem Selaras. Sesuai prinsip UU PDP, identitas pengunggah tidak diteruskan ke lapisan petugas lapangan.');
+      });
+    });
+  </script>
+</body>
+</html>
