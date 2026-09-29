@@ -32,6 +32,13 @@ def get_application() -> Application:
     return _application
 
 
+def get_bot():
+    global _application
+    if _application is None:
+        return None
+    return _application.bot
+
+
 async def build_application() -> Application:
     """Build and configure the python-telegram-bot Application."""
     global _application
