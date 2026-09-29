@@ -2,7 +2,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install build deps for packages with C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libgomp1 \
     && rm -rf /var/lib/apt/lists/*
@@ -12,7 +11,6 @@ RUN pip install --no-cache-dir -e ".[dev]"
 
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8501
 
-CMD ["sh", "-c", "uvicorn app.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8000}"]
-
+CMD ["sh", "-c", "streamlit run dashboard/app.py --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true --theme.base light"]
