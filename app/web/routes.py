@@ -292,9 +292,10 @@ async def submit_outcome(
 
 
 # ---------------------------------------------------------------------------
-# Officer Queue Portal (/portal)
+# Officer Queue Portal (/ & /portal)
 # ---------------------------------------------------------------------------
 
+@router.get("/", response_class=HTMLResponse)
 @router.get("/portal", response_class=HTMLResponse)
 async def officer_portal(
     request: Request,
