@@ -305,45 +305,73 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+from datetime import date, timedelta
+from sqlalchemy import create_engine, text
+
 # ---------------------------------------------------------------------------
-# Database Access Helpers
+# Configuration & Database Engine (PostgreSQL / SQLite)
 # ---------------------------------------------------------------------------
+RAW_DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./selaras.db")
+API_BASE = os.getenv("APP_BASE_URL", "http://localhost:8000")
+ADMIN_KEY = os.getenv("ADMIN_API_KEY", "admin-dev-key-12345")
+
+
+def _get_sync_db_url(raw_url: str) -> str:
+    if raw_url.startswith("postgresql+asyncpg://"):
+        return raw_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+    elif raw_url.startswith("postgres://"):
+        return raw_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif raw_url.startswith("postgresql://") and not raw_url.startswith("postgresql+"):
+        return raw_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    elif raw_url.startswith("sqlite+aiosqlite:///"):
+        return raw_url.replace("sqlite+aiosqlite:///", "sqlite:///", 1)
+    return raw_url
+
+
+SYNC_DB_URL = _get_sync_db_url(RAW_DB_URL)
+DB_TYPE_NAME = "PostgreSQL" if "postgres" in SYNC_DB_URL else "SQLite (selaras.db)"
+
+
+@st.cache_resource
+def get_db_engine():
+    if "sqlite" in SYNC_DB_URL:
+        return create_engine(SYNC_DB_URL, connect_args={"check_same_thread": False})
+    return create_engine(SYNC_DB_URL)
+
+
 @st.cache_data(ttl=15)
 def load_summary_kpis():
-    if not os.path.exists(DB_PATH):
-        return {
-            "companies": 0,
-            "cases_active": 0,
-            "reports_30d": 0,
-            "confirm_rate": 0.0,
-            "est_potential_idr": 0,
-        }
-    conn = sqlite3.connect(DB_PATH)
+    engine = get_db_engine()
     try:
-        companies = conn.execute("SELECT COUNT(*) FROM company WHERE status='active'").fetchone()[0]
-        cases_active = conn.execute(
-            "SELECT COUNT(*) FROM case_file WHERE status IN ('pending','assigned')"
-        ).fetchone()[0]
-        reports_30d = conn.execute(
-            "SELECT COUNT(*) FROM worker_report WHERE created_at >= date('now','-30 days')"
-        ).fetchone()[0]
-        visits_confirmed = conn.execute(
-            "SELECT COUNT(*) FROM visit_outcome WHERE result='TERBUKTI'"
-        ).fetchone()[0]
-        total_visits = conn.execute("SELECT COUNT(*) FROM visit_outcome").fetchone()[0]
-        confirm_rate = (visits_confirmed / total_visits) if total_visits > 0 else 1.0
+        with engine.connect() as conn:
+            companies = conn.execute(text("SELECT COUNT(*) FROM company WHERE status='active'")).fetchone()[0]
+            cases_active = conn.execute(
+                text("SELECT COUNT(*) FROM case_file WHERE status IN ('pending','assigned')")
+            ).fetchone()[0]
 
-        est_total = conn.execute(
-            "SELECT SUM(est_mid) FROM risk_score WHERE as_of = (SELECT MAX(as_of) FROM risk_score)"
-        ).fetchone()[0] or 0
+            cutoff = (date.today() - timedelta(days=30)).isoformat()
+            reports_30d = conn.execute(
+                text("SELECT COUNT(*) FROM worker_report WHERE created_at >= :cutoff"),
+                {"cutoff": cutoff}
+            ).fetchone()[0]
 
-        return {
-            "companies": companies,
-            "cases_active": cases_active,
-            "reports_30d": reports_30d,
-            "confirm_rate": confirm_rate,
-            "est_potential_idr": est_total,
-        }
+            visits_confirmed = conn.execute(
+                text("SELECT COUNT(*) FROM visit_outcome WHERE result='TERBUKTI'")
+            ).fetchone()[0]
+            total_visits = conn.execute(text("SELECT COUNT(*) FROM visit_outcome")).fetchone()[0]
+            confirm_rate = (visits_confirmed / total_visits) if total_visits > 0 else 1.0
+
+            est_total = conn.execute(
+                text("SELECT SUM(est_mid) FROM risk_score WHERE as_of = (SELECT MAX(as_of) FROM risk_score)")
+            ).fetchone()[0] or 0
+
+            return {
+                "companies": companies,
+                "cases_active": cases_active,
+                "reports_30d": reports_30d,
+                "confirm_rate": confirm_rate,
+                "est_potential_idr": est_total,
+            }
     except Exception:
         return {
             "companies": 6,
@@ -352,62 +380,54 @@ def load_summary_kpis():
             "confirm_rate": 1.0,
             "est_potential_idr": 163_000_000,
         }
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=15)
 def load_queue_df():
-    if not os.path.exists(DB_PATH):
-        return pd.DataFrame()
-    conn = sqlite3.connect(DB_PATH)
+    engine = get_db_engine()
     try:
-        df = pd.read_sql_query("""
-            SELECT cf.case_id, c.npp, c.name AS company, c.sector, r.city AS wilayah,
-                   rs.risk, cf.status, cf.priority,
-                   rs.est_low, rs.est_mid, rs.est_high,
-                   cf.reasons_json, cf.created_at
-            FROM case_file cf
-            JOIN company c ON c.company_id = cf.company_id
-            JOIN region r ON r.region_id = c.region_id
-            LEFT JOIN risk_score rs ON rs.company_id = cf.company_id
-                AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
-            ORDER BY cf.priority DESC
-            LIMIT 200
-        """, conn)
-        return df
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text("""
+                SELECT cf.case_id, c.npp, c.name AS company, c.sector, r.city AS wilayah,
+                       rs.risk, cf.status, cf.priority,
+                       rs.est_low, rs.est_mid, rs.est_high,
+                       cf.reasons_json, cf.created_at
+                FROM case_file cf
+                JOIN company c ON c.company_id = cf.company_id
+                JOIN region r ON r.region_id = c.region_id
+                LEFT JOIN risk_score rs ON rs.company_id = cf.company_id
+                    AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
+                ORDER BY cf.priority DESC
+                LIMIT 200
+            """), conn)
+            return df
     except Exception:
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=15)
 def load_region_risk():
-    if not os.path.exists(DB_PATH):
-        return pd.DataFrame()
-    conn = sqlite3.connect(DB_PATH)
+    engine = get_db_engine()
     try:
-        df = pd.read_sql_query("""
-            SELECT r.city AS wilayah, r.province,
-                   ROUND(AVG(rs.risk), 1) AS avg_risk,
-                   COUNT(DISTINCT cf.case_id) AS active_cases,
-                   COUNT(DISTINCT c.company_id) AS companies,
-                   ROUND(SUM(rs.est_mid) / 1000000.0, 1) AS total_est_jt
-            FROM region r
-            JOIN company c ON c.region_id = r.region_id
-            LEFT JOIN risk_score rs ON rs.company_id = c.company_id
-                AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
-            LEFT JOIN case_file cf ON cf.company_id = c.company_id
-                AND cf.status IN ('pending','assigned')
-            GROUP BY r.city, r.province
-            ORDER BY avg_risk DESC
-        """, conn)
-        return df
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text("""
+                SELECT r.city AS wilayah, r.province,
+                       ROUND(AVG(rs.risk), 1) AS avg_risk,
+                       COUNT(DISTINCT cf.case_id) AS active_cases,
+                       COUNT(DISTINCT c.company_id) AS companies,
+                       ROUND(SUM(rs.est_mid) / 1000000.0, 1) AS total_est_jt
+                FROM region r
+                JOIN company c ON c.region_id = r.region_id
+                LEFT JOIN risk_score rs ON rs.company_id = c.company_id
+                    AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
+                LEFT JOIN case_file cf ON cf.company_id = c.company_id
+                    AND cf.status IN ('pending','assigned')
+                GROUP BY r.city, r.province
+                ORDER BY avg_risk DESC
+            """), conn)
+            return df
     except Exception:
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -440,14 +460,14 @@ with h_col2:
         st.cache_data.clear()
         st.rerun()
 
-st.markdown("""
+st.markdown(f"""
 <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px;">
   <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #858585;">
     <span style="display: inline-block; width: 8px; height: 8px; background-color: #2ecea0; border-radius: 50%;"></span>
-    <span>Live SQLite (<code>selaras.db</code>) — Sinkronisasi otomatis & responsif terhadap mutasi data</span>
+    <span>Live Database (<code>{DB_TYPE_NAME}</code>) — Sinkronisasi otomatis & responsif terhadap mutasi data</span>
   </div>
   <div class="header-quick-links">
-    <a href="http://127.0.0.1:8000/portal" target="_blank" class="header-btn">
+    <a href="{API_BASE}/portal" target="_blank" class="header-btn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
         <circle cx="9" cy="7" r="4"></circle>
@@ -455,7 +475,7 @@ st.markdown("""
       </svg>
       Portal Petugas
     </a>
-    <a href="http://127.0.0.1:8000/verify" target="_blank" class="header-btn">
+    <a href="{API_BASE}/verify" target="_blank" class="header-btn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>

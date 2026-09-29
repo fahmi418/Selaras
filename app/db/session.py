@@ -8,11 +8,19 @@ from app.config import get_settings
 
 _settings = get_settings()
 
+def _get_normalized_db_url(raw_url: str) -> str:
+    if raw_url.startswith("postgres://"):
+        return raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if raw_url.startswith("postgresql://") and not raw_url.startswith("postgresql+"):
+        return raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return raw_url
+
+_db_url = _get_normalized_db_url(_settings.database_url)
+
 engine = create_async_engine(
-    _settings.database_url,
+    _db_url,
     echo=False,
-    # SQLite-specific: allow sharing connection across threads for testing
-    connect_args={"check_same_thread": False} if "sqlite" in _settings.database_url else {},
+    connect_args={"check_same_thread": False} if "sqlite" in _db_url else {},
 )
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     telegram_webhook_secret: SecretStr
 
     # Gemini
-    gemini_api_key: SecretStr
+    gemini_api_key: SecretStr = Field(default=SecretStr(""))
     gemini_model: str = "gemini-1.5-flash-latest"
+
+    # NVIDIA NIM (Vision fallback)
+    nvidia_nim_api_key: SecretStr = Field(default=SecretStr(""))
+    nvidia_nim_model: str = "meta/llama-3.2-11b-vision-instruct"
+    nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./selaras.db"
