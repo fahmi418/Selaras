@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Telegram
-    telegram_bot_token: SecretStr
-    telegram_webhook_secret: SecretStr
+    telegram_bot_token: SecretStr = Field(default=SecretStr(""))
+    telegram_webhook_secret: SecretStr = Field(default=SecretStr("selaras-tele-secret-999"))
 
     # Gemini
     gemini_api_key: SecretStr = Field(default=SecretStr(""))
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # NVIDIA NIM (Vision fallback)
     nvidia_nim_api_key: SecretStr = Field(default=SecretStr(""))
-    nvidia_nim_model: str = "meta/llama-3.2-11b-vision-instruct"
+    nvidia_nim_model: str = "meta/muse-glimmer-30b"
     nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Database
@@ -30,11 +30,11 @@ class Settings(BaseSettings):
 
     # App
     app_base_url: str = "http://localhost:8000"
-    secret_key: SecretStr = Field(default="dev-secret-change-me")
+    secret_key: SecretStr = Field(default=SecretStr("selaras-secret-key-32chars-minimum-demo"))
 
     # Auth
-    admin_api_key: SecretStr
-    internal_api_key: SecretStr
+    admin_api_key: SecretStr = Field(default=SecretStr("admin-dev-key-12345"))
+    internal_api_key: SecretStr = Field(default=SecretStr("internal-dev-key-12345"))
 
     # Tokens
     case_token_ttl_hours: int = 24
