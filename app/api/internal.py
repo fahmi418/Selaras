@@ -171,6 +171,95 @@ async def verify_slip(payload: SlipVerifyRequest):
 # Admin API
 # ---------------------------------------------------------------------------
 
+class CreateCompanyRequest(BaseModel):
+    name: str
+    npp: str
+    sector: str = "jasa"
+    region_id: str = "jkt-utara"
+    registered_headcount: int = 50
+    est_headcount: Optional[int] = None
+    average_wage_base: int = 5_000_000
+
+
+@router.post("/admin/company", dependencies=[Depends(require_admin)])
+async def create_company(
+    payload: CreateCompanyRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    """Register a new company / instansi."""
+    from uuid import uuid4
+    from app.db.models import Company, Enrollment, Billing, RiskScore
+
+    # Check if NPP already exists
+    existing = await session.execute(select(Company).where(Company.npp == payload.npp.strip()))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Badan Usaha dengan NPP {payload.npp} sudah terdaftar.")
+
+    company_id = f"comp-{uuid4().hex[:8]}"
+    est_count = payload.est_headcount or payload.registered_headcount
+
+    company = Company(
+        company_id=company_id,
+        npp=payload.npp.strip(),
+        name=payload.name.strip(),
+        sector=payload.sector.lower(),
+        region_id=payload.region_id,
+        size_bucket="large" if payload.registered_headcount >= 100 else ("medium" if payload.registered_headcount >= 20 else "small"),
+        est_headcount=est_count,
+        registered_headcount=payload.registered_headcount,
+        status="active",
+    )
+    session.add(company)
+
+    # Add baseline enrollment
+    session.add(Enrollment(
+        enrollment_id=f"enr-{uuid4().hex[:8]}",
+        company_id=company_id,
+        worker_pid=f"pid-{uuid4().hex[:6]}",
+        reported_wage_base=payload.average_wage_base,
+        registered_status="karyawan_tetap",
+    ))
+
+    # Add baseline billing (5% tariff: 4% employer + 1% worker)
+    billed = int(payload.registered_headcount * payload.average_wage_base * 0.05)
+    period_str = date.today().strftime("%Y-%m")
+    session.add(Billing(
+        billing_id=f"bil-{uuid4().hex[:8]}",
+        company_id=company_id,
+        period=period_str,
+        billed_amount=billed,
+        paid_amount=billed,
+        due_date=date.today(),
+        paid_at=date.today(),
+    ))
+
+    # Add initial risk score baseline
+    session.add(RiskScore(
+        score_id=f"risk-{uuid4().hex[:8]}",
+        company_id=company_id,
+        as_of=date.today(),
+        risk=20.0,
+        rule_score=0.0,
+        anomaly_score=0.0,
+        signals_json=json.dumps({}),
+        est_low=0,
+        est_mid=0,
+        est_high=0,
+        p_valid=0.5,
+        model_version="1.0.0",
+    ))
+
+    await write_audit(session, actor="admin", action="COMPANY_CREATE", object_ref=company_id, meta={"name": company.name, "npp": company.npp})
+    await session.commit()
+
+    return {
+        "status": "ok",
+        "company_id": company.company_id,
+        "name": company.name,
+        "npp": company.npp,
+    }
+
+
 @router.post("/admin/synth/reset", dependencies=[Depends(require_admin)])
 async def reset_synthetic_data(session: AsyncSession = Depends(get_db)):
     """Drop and reload all synthetic data from generator with fixed seed."""

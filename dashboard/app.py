@@ -425,6 +425,39 @@ def load_region_risk():
                 GROUP BY r.city, r.province
                 ORDER BY avg_risk DESC
             """), conn)
+@st.cache_data(ttl=60)
+def load_regions_list():
+    engine = get_db_engine()
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text("SELECT region_id, city, province, umk FROM region ORDER BY city ASC"), conn)
+            if not df.empty:
+                return df
+    except Exception:
+        pass
+    return pd.DataFrame([
+        {"region_id": "jkt-utara", "city": "Jakarta Utara", "province": "DKI Jakarta", "umk": 5067381},
+        {"region_id": "kab-bekasi", "city": "Kab. Bekasi", "province": "Jawa Barat", "umk": 5219263},
+        {"region_id": "kota-surabaya", "city": "Kota Surabaya", "province": "Jawa Timur", "umk": 4725479},
+        {"region_id": "kota-semarang", "city": "Kota Semarang", "province": "Jawa Tengah", "umk": 3243969},
+    ])
+
+
+@st.cache_data(ttl=15)
+def load_companies_df():
+    engine = get_db_engine()
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text("""
+                SELECT c.company_id, c.npp, c.name AS company, c.sector, r.city AS wilayah,
+                       c.registered_headcount, c.status,
+                       rs.risk, rs.est_mid
+                FROM company c
+                LEFT JOIN region r ON r.region_id = c.region_id
+                LEFT JOIN risk_score rs ON rs.company_id = c.company_id
+                    AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
+                ORDER BY c.name ASC
+            """), conn)
             return df
     except Exception:
         return pd.DataFrame()
@@ -742,10 +775,233 @@ with tabs[3]:
 # Tab 5: Administrasi & Batch
 # ===========================================================================
 with tabs[4]:
+    # -----------------------------------------------------------------------
+    # Section A: Pendaftaran Instansi / Badan Usaha Baru (Live Production)
+    # -----------------------------------------------------------------------
     st.markdown("""
     <div style="margin-bottom: 16px;">
-      <h3 style="font-size: 18px; font-weight: 600; color: #244d54; margin: 0;">Kontrol Administratif & Simulasi Batch</h3>
-      <p style="font-size: 13px; color: #858585; margin: 2px 0 0 0;">Gunakan panel ini untuk memicu job batch terjadwal secara manual untuk kebutuhan demonstrasi</p>
+      <h3 style="font-size: 18px; font-weight: 600; color: #244d54; margin: 0;">Pendaftaran Instansi / Badan Usaha Baru</h3>
+      <p style="font-size: 13px; color: #858585; margin: 2px 0 0 0;">Daftarkan instansi atau badan usaha secara mandiri (non-seeder) ke dalam sistem pengawasan JKN</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.expander("Formulir Registrasi Entitas Badan Usaha", expanded=True):
+        st.markdown("""
+        <div style="font-size: 13px; color: #4d4d4d; line-height: 1.5; margin-bottom: 16px;">
+          Entitas yang didaftarkan akan langsung aktif di database, memiliki data kepesertaan & tagihan awal, serta dapat langsung dicari oleh pekerja melalui <strong>Bot Telegram (@selaras_jkn_demo_bot)</strong> atau diverifikasi di <strong>Lab Verifikasi</strong>.
+        </div>
+        """, unsafe_allow_html=True)
+
+        regions_df = load_regions_list()
+        region_map = {
+            f"{row['city']} ({row['province']}) — UMK Rp {int(row['umk']):,}": row["region_id"]
+            for _, row in regions_df.iterrows()
+        }
+        region_labels = list(region_map.keys())
+
+        with st.form(key="register_company_form", clear_on_submit=True):
+            f_col1, f_col2 = st.columns(2)
+            with f_col1:
+                comp_name = st.text_input(
+                    "Nama Instansi / Badan Usaha",
+                    placeholder="Contoh: PT Sumber Pangan Makmur",
+                    help="Nama resmi perusahaan sesuai akta/SK Kemenkumham"
+                )
+                comp_npp = st.text_input(
+                    "Nomor Pokok Perusahaan (NPP)",
+                    placeholder="Contoh: 01887766",
+                    help="8 digit kode unik NPP BPJS Kesehatan"
+                )
+                selected_region_label = st.selectbox(
+                    "Wilayah Kerja BPJS (Kabupaten/Kota)",
+                    region_labels,
+                    help="Kantor cabang BPJS Kesehatan yang mengampu wilayah entitas"
+                )
+
+            with f_col2:
+                comp_sector = st.selectbox(
+                    "Sektor Industri / Usaha",
+                    [
+                        ("manufaktur", "Manufaktur & Pabrikasi"),
+                        ("logistik", "Logistik & Transportasi"),
+                        ("ritel", "Ritel & Perdagangan Besar"),
+                        ("jasa", "Jasa Keuangan, Konsultan & Profesional"),
+                        ("fb", "Food & Beverage / Restoran"),
+                        ("konstruksi", "Konstruksi & Properti"),
+                        ("kesehatan", "Fasilitas Kesehatan & Farmasi"),
+                    ],
+                    format_func=lambda x: x[1]
+                )
+                comp_headcount = st.number_input(
+                    "Jumlah Tenaga Kerja Terdaftar",
+                    min_value=1,
+                    max_value=100000,
+                    value=50,
+                    step=5,
+                    help="Jumlah pekerja yang dilaporkan aktif di BPJS Kesehatan"
+                )
+                comp_wage = st.number_input(
+                    "Rata-rata Upah Terdaftar (Rp/Bulan)",
+                    min_value=1000000,
+                    max_value=100000000,
+                    value=5200000,
+                    step=100000,
+                    help="Dasar perhitungan iuran rata-rata (wage base) yang terdaftar"
+                )
+
+            submit_reg = st.form_submit_button("Daftarkan Instansi Sekarang", type="primary")
+
+            if submit_reg:
+                if not comp_name.strip() or not comp_npp.strip():
+                    st.error("Nama Instansi dan NPP wajib diisi.")
+                else:
+                    region_id = region_map.get(selected_region_label, "jkt-utara")
+                    sector_val = comp_sector[0] if isinstance(comp_sector, tuple) else comp_sector
+
+                    payload = {
+                        "name": comp_name.strip(),
+                        "npp": comp_npp.strip(),
+                        "sector": sector_val,
+                        "region_id": region_id,
+                        "registered_headcount": int(comp_headcount),
+                        "est_headcount": int(comp_headcount),
+                        "average_wage_base": int(comp_wage),
+                    }
+
+                    success = False
+                    error_msg = ""
+                    # 1. Try internal REST API
+                    try:
+                        import requests
+                        r = requests.post(
+                            f"{API_BASE}/admin/company",
+                            json=payload,
+                            headers={"X-API-Key": ADMIN_KEY},
+                            timeout=10,
+                        )
+                        if r.ok:
+                            success = True
+                        else:
+                            error_msg = r.text
+                    except Exception as e:
+                        error_msg = str(e)
+
+                    # 2. Fallback directly via database engine if API was unreachable
+                    if not success:
+                        try:
+                            from uuid import uuid4
+                            engine = get_db_engine()
+                            comp_id = f"comp-{uuid4().hex[:8]}"
+                            enr_id = f"enr-{uuid4().hex[:8]}"
+                            bil_id = f"bil-{uuid4().hex[:8]}"
+                            rsk_id = f"risk-{uuid4().hex[:8]}"
+                            today_str = date.today().isoformat()
+                            period_str = date.today().strftime("%Y-%m")
+                            billed_val = int(int(comp_headcount) * int(comp_wage) * 0.05)
+                            size_b = "large" if int(comp_headcount) >= 100 else ("medium" if int(comp_headcount) >= 20 else "small")
+
+                            with engine.begin() as conn:
+                                # Check existing
+                                exists = conn.execute(
+                                    text("SELECT COUNT(*) FROM company WHERE npp = :npp"),
+                                    {"npp": comp_npp.strip()}
+                                ).fetchone()[0]
+                                if exists > 0:
+                                    st.error(f"Badan Usaha dengan NPP {comp_npp.strip()} sudah terdaftar.")
+                                else:
+                                    conn.execute(text("""
+                                        INSERT INTO company (company_id, npp, name, sector, region_id, size_bucket, est_headcount, registered_headcount, status, created_at)
+                                        VALUES (:cid, :npp, :name, :sector, :rid, :size, :est, :reg, 'active', :created)
+                                    """), {
+                                        "cid": comp_id, "npp": comp_npp.strip(), "name": comp_name.strip(),
+                                        "sector": sector_val, "rid": region_id, "size": size_b,
+                                        "est": int(comp_headcount), "reg": int(comp_headcount), "created": today_str
+                                    })
+                                    conn.execute(text("""
+                                        INSERT INTO enrollment (enrollment_id, company_id, worker_pid, reported_wage_base, registered_status, created_at)
+                                        VALUES (:eid, :cid, :pid, :wage, 'karyawan_tetap', :created)
+                                    """), {
+                                        "eid": enr_id, "cid": comp_id, "pid": f"pid-{uuid4().hex[:6]}",
+                                        "wage": int(comp_wage), "created": today_str
+                                    })
+                                    conn.execute(text("""
+                                        INSERT INTO billing (billing_id, company_id, period, billed_amount, paid_amount, due_date, paid_at)
+                                        VALUES (:bid, :cid, :period, :amt, :amt, :today, :today)
+                                    """), {
+                                        "bid": bil_id, "cid": comp_id, "period": period_str,
+                                        "amt": billed_val, "today": today_str
+                                    })
+                                    conn.execute(text("""
+                                        INSERT INTO risk_score (score_id, company_id, as_of, risk, rule_score, anomaly_score, signals_json, est_low, est_mid, est_high, p_valid, model_version)
+                                        VALUES (:sid, :cid, :today, 20.0, 0.0, 0.0, '{}', 0, 0, 0, 0.5, '1.0.0')
+                                    """), {
+                                        "sid": rsk_id, "cid": comp_id, "today": today_str
+                                    })
+                                    success = True
+                        except Exception as db_err:
+                            error_msg = str(db_err)
+
+                    if success:
+                        st.markdown(f"""
+                        <div style="background-color: rgba(46, 206, 160, 0.12); border: 1px solid rgba(46, 206, 160, 0.3); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #047857; margin-top: 10px;">
+                          <strong>Instansi Berhasil Didaftarkan!</strong><br>
+                          Badan Usaha <strong>{comp_name.strip()}</strong> (NPP: <code>{comp_npp.strip()}</code>) telah aktif di database pengawasan. Pekerja sekarang dapat mencari dan mengirimkan laporan slip gaji secara langsung.
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.cache_data.clear()
+                    else:
+                        st.markdown(f"""
+                        <div style="background-color: rgba(212, 67, 51, 0.08); border: 1px solid rgba(212, 67, 51, 0.25); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: #c53022; margin-top: 10px;">
+                          Gagal mendaftarkan instansi: {error_msg}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+    # -----------------------------------------------------------------------
+    # Section B: Direktori Instansi Terdaftar
+    # -----------------------------------------------------------------------
+    st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin-bottom: 12px;">
+      <h4 style="font-size: 16px; font-weight: 600; color: #244d54; margin: 0;">Direktori Seluruh Instansi Terdaftar</h4>
+      <p style="font-size: 12px; color: #858585; margin: 2px 0 0 0;">Daftar seluruh entitas yang saat ini terpantau dalam basis data sistem</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    all_comps_df = load_companies_df()
+    if not all_comps_df.empty:
+        c_search = st.text_input("Cari Instansi / NPP", placeholder="Ketik nama badan usaha atau nomor NPP...")
+        if c_search:
+            filtered_comps = all_comps_df[
+                all_comps_df["company"].str.contains(c_search, case=False, na=False) |
+                all_comps_df["npp"].str.contains(c_search, case=False, na=False)
+            ]
+        else:
+            filtered_comps = all_comps_df
+
+        st.dataframe(
+            filtered_comps[[
+                "company", "npp", "wilayah", "sector", "registered_headcount", "risk", "status"
+            ]].rename(columns={
+                "company": "Nama Instansi / Badan Usaha",
+                "npp": "NPP",
+                "wilayah": "Wilayah Kerja",
+                "sector": "Sektor Usaha",
+                "registered_headcount": "Pekerja Terdaftar",
+                "risk": "Skor Risiko",
+                "status": "Status",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    # -----------------------------------------------------------------------
+    # Section C: Kontrol Demonstrasi & Pipeline
+    # -----------------------------------------------------------------------
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin-bottom: 16px;">
+      <h4 style="font-size: 16px; font-weight: 600; color: #244d54; margin: 0;">Kontrol Demonstrasi & Simulasi Batch</h4>
+      <p style="font-size: 12px; color: #858585; margin: 2px 0 0 0;">Panel kontrol pemeliharaan dan pemicuan job terjadwal secara manual</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -763,7 +1019,7 @@ with tabs[4]:
         </div>
         """, unsafe_allow_html=True)
 
-        if st.button("Reset Data Demonstrasi", type="primary"):
+        if st.button("Reset Data Demonstrasi", type="secondary"):
             try:
                 import requests
                 r = requests.post(
@@ -841,3 +1097,4 @@ with tabs[4]:
                   Gagal menghubungi server backend: {e}
                 </div>
                 """, unsafe_allow_html=True)
+
