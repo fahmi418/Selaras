@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from telegram import Update
 from telegram.ext import ContextTypes
+from sqlalchemy import select, or_, delete
 
 from app.audit import write_audit
 from app.bot.keyboards import clarification_keyboard, verdict_action_keyboard, work_status_keyboard, skip_keyboard
