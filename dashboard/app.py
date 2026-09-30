@@ -915,32 +915,32 @@ with tabs[4]:
                                     st.error(f"Badan Usaha dengan NPP {comp_npp.strip()} sudah terdaftar.")
                                 else:
                                     conn.execute(text("""
-                                        INSERT INTO company (company_id, npp, name, sector, region_id, size_bucket, est_headcount, registered_headcount, status, created_at)
-                                        VALUES (:cid, :npp, :name, :sector, :rid, :size, :est, :reg, 'active', :created)
+                                        INSERT INTO company (company_id, npp, name, sector, region_id, size_bucket, est_headcount, registered_headcount, status)
+                                        VALUES (:cid, :npp, :name, :sector, :rid, :size, :est, :reg, 'active')
                                     """), {
                                         "cid": comp_id, "npp": comp_npp.strip(), "name": comp_name.strip(),
                                         "sector": sector_val, "rid": region_id, "size": size_b,
-                                        "est": int(comp_headcount), "reg": int(comp_headcount), "created": today_str
+                                        "est": int(comp_headcount), "reg": int(comp_headcount)
                                     })
                                     conn.execute(text("""
-                                        INSERT INTO enrollment (enrollment_id, company_id, worker_pid, reported_wage_base, registered_status, created_at)
-                                        VALUES (:eid, :cid, :pid, :wage, 'karyawan_tetap', :created)
+                                        INSERT INTO enrollment (enrollment_id, company_id, worker_pid, reported_wage_base, registered_status)
+                                        VALUES (:eid, :cid, :pid, :wage, 'karyawan_tetap')
                                     """), {
                                         "eid": enr_id, "cid": comp_id, "pid": f"pid-{uuid4().hex[:6]}",
-                                        "wage": int(comp_wage), "created": today_str
+                                        "wage": int(comp_wage)
                                     })
                                     conn.execute(text("""
-                                        INSERT INTO billing (billing_id, company_id, period, billed_amount, paid_amount, due_date, paid_at)
-                                        VALUES (:bid, :cid, :period, :amt, :amt, :today, :today)
+                                        INSERT INTO billing (company_id, period, billed_amount, paid_amount, paid_at)
+                                        VALUES (:cid, :period, :amt, :amt, :today)
                                     """), {
-                                        "bid": bil_id, "cid": comp_id, "period": period_str,
+                                        "cid": comp_id, "period": period_str,
                                         "amt": billed_val, "today": today_str
                                     })
                                     conn.execute(text("""
-                                        INSERT INTO risk_score (score_id, company_id, as_of, risk, rule_score, anomaly_score, signals_json, est_low, est_mid, est_high, p_valid, model_version)
-                                        VALUES (:sid, :cid, :today, 20.0, 0.0, 0.0, '{}', 0, 0, 0, 0.5, '1.0.0')
+                                        INSERT INTO risk_score (company_id, as_of, risk, rule_score, anomaly_score, signals_json, est_low, est_mid, est_high, p_valid, model_version)
+                                        VALUES (:cid, :today, 20.0, 0.0, 0.0, '{}', 0, 0, 0, 0.5, '1.0.0')
                                     """), {
-                                        "sid": rsk_id, "cid": comp_id, "today": today_str
+                                        "cid": comp_id, "today": today_str
                                     })
                                     success = True
                         except Exception as db_err:

@@ -224,18 +224,15 @@ async def create_company(
     billed = int(payload.registered_headcount * payload.average_wage_base * 0.05)
     period_str = date.today().strftime("%Y-%m")
     session.add(Billing(
-        billing_id=f"bil-{uuid4().hex[:8]}",
         company_id=company_id,
         period=period_str,
         billed_amount=billed,
         paid_amount=billed,
-        due_date=date.today(),
         paid_at=date.today(),
     ))
 
     # Add initial risk score baseline
     session.add(RiskScore(
-        score_id=f"risk-{uuid4().hex[:8]}",
         company_id=company_id,
         as_of=date.today(),
         risk=20.0,
