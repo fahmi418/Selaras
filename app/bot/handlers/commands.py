@@ -164,6 +164,10 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
 
     if action == "yes":
         async with AsyncSessionLocal() as session:
+            from sqlalchemy import select
+            from app.db.models import Company
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
             existing = await session.get(WorkerConsent, worker_hash)
             if existing:
                 existing.revoked_at = None
@@ -177,11 +181,23 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
                 ))
             await session.commit()
 
-        await query.edit_message_text(
-            "Terima kasih. Sekarang kirim foto slip gaji Anda.\n\n"
-            "Pertama, cari perusahaan Anda — ketik nama atau kode NPP:"
-        )
+            # Fetch all active companies to display immediately
+            all_res = await session.execute(
+                select(Company).where(Company.status == "active").order_by(Company.name.asc())
+            )
+            all_comps = all_res.scalars().all()
+
         context.user_data["state"] = "SELECTING_COMPANY"
+        buttons = [
+            [InlineKeyboardButton(f"{c.name} (NPP: {c.npp})", callback_data=f"company:select:{c.company_id}")]
+            for c in all_comps
+        ]
+
+        await query.edit_message_text(
+            "Terima kasih. Silakan pilih perusahaan Anda dari daftar seluruh instansi di bawah, atau ketik nama/NPP untuk mencari:\n\n"
+            "(Anda juga dapat langsung mengirimkan foto slip gaji kapan saja)",
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+        )
 
     elif action == "read":
         await query.message.reply_html(_PRIVACY_TEXT.format(version=_CONSENT_VERSION))
@@ -190,6 +206,31 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(
             "Tidak masalah. Anda bisa kembali kapan saja dengan /start.\n"
             "Kami tidak menyimpan data Anda tanpa persetujuan."
+        )
+
+
+async def cmd_lapor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show all registered companies for slip submission."""
+    if not update.message:
+        return
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select
+        from app.db.models import Company
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        all_res = await session.execute(
+            select(Company).where(Company.status == "active").order_by(Company.name.asc())
+        )
+        all_comps = all_res.scalars().all()
+
+        buttons = [
+            [InlineKeyboardButton(f"{c.name} (NPP: {c.npp})", callback_data=f"company:select:{c.company_id}")]
+            for c in all_comps
+        ]
+        await update.message.reply_text(
+            "Pilih perusahaan Anda dari daftar seluruh instansi terdaftar di bawah, atau ketik nama/NPP untuk mencari:\n\n"
+            "(Anda juga dapat langsung mengirimkan foto slip gaji)",
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
         )
 
 
@@ -207,27 +248,46 @@ async def handle_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE)
         from app.db.models import Company
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        # Search by name or NPP (case-insensitive)
+        # 1. Exact / Substring search
         query = select(Company).where(
+            Company.status == "active",
             or_(
                 Company.name.ilike(f"%{text}%"),
                 Company.npp.ilike(f"%{text}%"),
             )
-        ).limit(5)
+        ).order_by(Company.name.asc())
         res = await session.execute(query)
         companies = res.scalars().all()
 
+        # 2. If no direct match, try word-level fuzzy matching
         if not companies:
-            all_comp_res = await session.execute(select(Company).limit(4))
-            sample_companies = all_comp_res.scalars().all()
+            words = [w for w in text.split() if len(w) >= 3 and w.lower() not in ["dan", "yang", "untuk", "dari", "pt", "cv", "tbk"]]
+            if words:
+                word_filters = [
+                    or_(Company.name.ilike(f"%{w}%"), Company.npp.ilike(f"%{w}%"))
+                    for w in words
+                ]
+                fuzzy_query = select(Company).where(
+                    Company.status == "active",
+                    or_(*word_filters)
+                ).order_by(Company.name.asc())
+                f_res = await session.execute(fuzzy_query)
+                companies = f_res.scalars().all()
+
+        # 3. If still not found, list ALL registered companies in database
+        if not companies:
+            all_comp_res = await session.execute(
+                select(Company).where(Company.status == "active").order_by(Company.name.asc())
+            )
+            all_companies = all_comp_res.scalars().all()
             
             buttons = [
-                [InlineKeyboardButton(f"{c.name} ({c.npp})", callback_data=f"company:select:{c.company_id}")]
-                for c in sample_companies
+                [InlineKeyboardButton(f"{c.name} (NPP: {c.npp})", callback_data=f"company:select:{c.company_id}")]
+                for c in all_companies
             ]
             await update.message.reply_text(
-                f"Perusahaan '{text}' tidak ditemukan di database contoh.\n\n"
-                "Pilih dari daftar contoh berikut atau langsung kirimkan foto slip gaji Anda:",
+                f"Perusahaan '{text}' tidak ditemukan.\n\n"
+                f"Berikut seluruh ({len(all_companies)}) instansi/perusahaan yang terdaftar di sistem. Silakan pilih:",
                 reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
             )
             return
@@ -243,11 +303,11 @@ async def handle_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
         else:
             buttons = [
-                [InlineKeyboardButton(f"{c.name} ({c.npp})", callback_data=f"company:select:{c.company_id}")]
+                [InlineKeyboardButton(f"{c.name} (NPP: {c.npp})", callback_data=f"company:select:{c.company_id}")]
                 for c in companies
             ]
             await update.message.reply_text(
-                f"Ditemukan {len(companies)} perusahaan. Pilih yang sesuai:",
+                f"Ditemukan {len(companies)} perusahaan yang cocok. Pilih perusahaan Anda:",
                 reply_markup=InlineKeyboardMarkup(buttons),
             )
 

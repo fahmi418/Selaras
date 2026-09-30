@@ -12,6 +12,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Mess
 from app.bot.handlers.commands import (
     cmd_bantuan,
     cmd_hapus,
+    cmd_lapor,
     cmd_privasi,
     cmd_start,
     cmd_status,
@@ -59,6 +60,7 @@ async def build_application() -> Application:
 
     # Commands
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler(["lapor", "perusahaan", "daftar"], cmd_lapor))
     app.add_handler(CommandHandler("cek", handle_photo))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("hapus", cmd_hapus))
