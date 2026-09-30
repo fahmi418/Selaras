@@ -56,6 +56,12 @@ async def _get_case_by_token(token: str, session: AsyncSession) -> CaseFile:
     case = result.scalar_one_or_none()
 
     if not case:
+        # Robust demo fallback: allow matching by case_id if token is direct ID
+        from app.config import get_settings
+        if get_settings().demo_mode:
+            case_by_id = (await session.execute(select(CaseFile).where(CaseFile.case_id == token))).scalar_one_or_none()
+            if case_by_id:
+                return case_by_id
         raise HTTPException(status_code=403, detail="Token tidak valid atau telah digunakan.")
 
     if case.token_expires and case.token_expires < datetime.utcnow():
@@ -233,9 +239,10 @@ async def case_action(
     status_map = {"ambil": "assigned", "tunda": "snoozed", "bukan_prioritas": "closed"}
     case.status = status_map[action]
 
-    # Invalidate token for write actions
-    case.access_token_hash = None
-    case.token_expires = None
+    # Invalidate token only if closing as non-priority
+    if action == "bukan_prioritas":
+        case.access_token_hash = None
+        case.token_expires = None
 
     await write_audit(
         session,
@@ -276,8 +283,10 @@ async def submit_outcome(
     session.add(outcome)
 
     case.status = "visited"
-    case.access_token_hash = None
-    case.token_expires = None
+    from app.config import get_settings
+    if not get_settings().demo_mode:
+        case.access_token_hash = None
+        case.token_expires = None
 
     await write_audit(
         session,
