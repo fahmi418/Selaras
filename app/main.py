@@ -27,6 +27,23 @@ async def lifespan(app: FastAPI):
     await create_tables()
     logger.info("database tables verified/created")
 
+    # Auto-seed demo data if DB is empty and demo_mode is enabled
+    if settings.demo_mode:
+        try:
+            from sqlalchemy import select, func
+            from app.db.models import Company
+            from app.db.session import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                count_res = await session.execute(select(func.count()).select_from(Company))
+                count = count_res.scalar_one_or_none() or 0
+                if count == 0:
+                    logger.info("demo mode active and database empty, seeding initial demo data")
+                    from synth.seed_demo import seed
+                    await seed()
+                    logger.info("demo data seeded successfully")
+        except Exception as exc:
+            logger.warning("auto-seeding failed or skipped", error=str(exc))
+
     # Build and initialize bot application
     bot_app = None
     try:
