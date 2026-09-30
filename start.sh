@@ -1,20 +1,31 @@
 #!/bin/bash
 set -e
 
-PORT="${PORT:-8000}"
+PORT="${PORT:-8080}"
 echo "========================================================"
 echo " Starting Selaras Unified Service on port ${PORT}..."
 echo "========================================================"
 
-# Substitute PORT into nginx configuration
-sed "s/PORT_PLACEHOLDER/${PORT}/g" /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+# Prepare listen directives so Nginx listens on $PORT, 8000, and 8080
+LISTEN_DIRECTIVES="listen ${PORT};"
+if [ "${PORT}" != "8000" ]; then
+    LISTEN_DIRECTIVES="${LISTEN_DIRECTIVES}
+        listen 8000;"
+fi
+if [ "${PORT}" != "8080" ] && [ "${PORT}" != "8000" ]; then
+    LISTEN_DIRECTIVES="${LISTEN_DIRECTIVES}
+        listen 8080;"
+fi
 
-# Start FastAPI backend in background
-echo "Starting FastAPI backend on 127.0.0.1:8000..."
-uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 &
+# Substitute LISTEN_DIRECTIVES into nginx configuration
+awk -v r="${LISTEN_DIRECTIVES}" '{gsub(/LISTEN_DIRECTIVES/, r)}1' /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+
+# Start FastAPI backend in background on 127.0.0.1:8001
+echo "Starting FastAPI backend on 127.0.0.1:8001..."
+uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8001 &
 FASTAPI_PID=$!
 
-# Start Streamlit dashboard in background
+# Start Streamlit dashboard in background on 127.0.0.1:8501
 echo "Starting Streamlit dashboard on 127.0.0.1:8501 (subpath /dashboard)..."
 streamlit run dashboard/app.py \
     --server.port 8501 \
@@ -33,7 +44,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start Nginx in foreground
-echo "Starting Nginx reverse proxy on port ${PORT}..."
+echo "Starting Nginx reverse proxy..."
 nginx -g "daemon off;" &
 NGINX_PID=$!
 

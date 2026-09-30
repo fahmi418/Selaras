@@ -23,12 +23,12 @@ from google.api_core import exceptions as gapi_exc
 
 from app.config import get_settings
 from app.slip.schema import (
-    ExtractionQuality,
-    MoneyField,
-    NamedField,
+    DeductionItem,
+    EarningsItem,
+    ExtractionField,
     PayslipExtraction,
-    PeriodField,
-    WageComponent,
+    SlipPeriod,
+    SlipQuality,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,22 +200,22 @@ def _fallback_demo_extraction() -> PayslipExtraction:
     """Deterministic fallback slip for offline local / demo testing."""
     return PayslipExtraction(
         is_payslip=True,
-        period=PeriodField(month=9, year=2024, confidence=0.98),
-        employer_name=NamedField(value="PT Cipta Logistik Nusantara", confidence=0.95),
+        period=SlipPeriod(month=9, year=2024, confidence=0.98),
+        employer_name=ExtractionField[str](value="PT Cipta Logistik Nusantara", confidence=0.95),
         currency="IDR",
         earnings=[
-            WageComponent(label="Gaji Pokok", amount=5_000_000, confidence=0.98),
-            WageComponent(label="Tunjangan Jabatan", amount=600_000, confidence=0.95),
-            WageComponent(label="Uang Makan Harian", amount=400_000, confidence=0.92),
+            EarningsItem(label="Gaji Pokok", amount=5_000_000, confidence=0.98),
+            EarningsItem(label="Tunjangan Jabatan", amount=600_000, confidence=0.95),
+            EarningsItem(label="Uang Makan Harian", amount=400_000, confidence=0.92),
         ],
         deductions=[
-            WageComponent(label="BPJS Kesehatan (1%)", amount=38_000, confidence=0.97),
-            WageComponent(label="BPJS Ketenagakerjaan", amount=120_000, confidence=0.95),
-            WageComponent(label="PPh 21", amount=75_000, confidence=0.90),
+            DeductionItem(label="BPJS Kesehatan (1%)", amount=38_000, confidence=0.97),
+            DeductionItem(label="BPJS Ketenagakerjaan", amount=120_000, confidence=0.95),
+            DeductionItem(label="PPh 21", amount=75_000, confidence=0.90),
         ],
-        gross_total=MoneyField(value=6_000_000, confidence=0.98),
-        net_total=MoneyField(value=5_767_000, confidence=0.98),
-        quality=ExtractionQuality(legible=True, skew_ok=True, notes="Fallback demo extractor"),
+        gross_total=ExtractionField[int](value=6_000_000, confidence=0.98),
+        net_total=ExtractionField[int](value=5_767_000, confidence=0.98),
+        quality=SlipQuality(legible=True, skew_ok=True, notes="Fallback demo extractor"),
     )
 
 
