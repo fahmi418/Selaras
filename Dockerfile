@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install build deps and nginx for unified proxying
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libgomp1 nginx \
+    gcc libgomp1 nginx libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml .

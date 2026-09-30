@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import get_settings
 from app.db.models import Base
+from app.db.session import _get_normalized_db_url
 
 config = context.config
 if config.config_file_name:
@@ -19,7 +20,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = get_settings().database_url
+    url = _get_normalized_db_url(get_settings().database_url)
     context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
@@ -32,7 +33,7 @@ def do_run_migrations(connection):
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(get_settings().database_url)
+    engine = create_async_engine(_get_normalized_db_url(get_settings().database_url))
     async with engine.begin() as conn:
         await conn.run_sync(do_run_migrations)
     await engine.dispose()
