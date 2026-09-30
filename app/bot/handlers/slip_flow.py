@@ -122,18 +122,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Sedang membaca slip Anda... (≤30 detik)")
         start_ms = int(time.monotonic() * 1000)
 
-        # Download photo (highest resolution)
-        photo = update.message.photo[-1]
-        photo_file = await photo.get_file()
+        # Download photo or document (highest resolution)
+        if update.message.photo:
+            file_obj = await update.message.photo[-1].get_file()
+        elif update.message.document:
+            file_obj = await update.message.document.get_file()
+        else:
+            await update.message.reply_text("Silakan kirim foto atau dokumen gambar slip gaji Anda.")
+            return
 
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
-            await photo_file.download_to_drive(tmp_path)
+            await file_obj.download_to_drive(tmp_path)
             raw_bytes = open(tmp_path, "rb").read()
         finally:
-            os.unlink(tmp_path)  # Photo deleted immediately — never touches disk long-term
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)  # File deleted immediately — never touches disk long-term
 
         # Preprocess
         try:

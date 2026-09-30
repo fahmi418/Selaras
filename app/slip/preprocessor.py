@@ -20,20 +20,34 @@ from PIL import Image, ImageFilter, ImageOps
 
 _MAX_LONG_EDGE = 1024
 _JPEG_QUALITY = 88
-_ALLOWED_MIME_PREFIXES = ("image/jpeg", "image/png", "image/heic", "image/heif", "application/pdf")
+_ALLOWED_MIME_PREFIXES = ("image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf")
 
 
 def _detect_mime(data: bytes) -> str:
     """Sniff MIME from magic bytes without relying on python-magic for portability."""
     sig = data[:16]
-    if sig[:4] == b"\xff\xd8\xff":
+    if sig.startswith(b"\xff\xd8"):
         return "image/jpeg"
-    if sig[:8] == b"\x89PNG\r\n\x1a\n":
+    if sig.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
+    if sig.startswith(b"RIFF") and b"WEBP" in sig:
+        return "image/webp"
+    if sig.startswith(b"%PDF"):
+        return "application/pdf"
     if sig[:4] in (b"\x00\x00\x00\x18", b"\x00\x00\x00\x20") and b"heic" in sig[:16].lower():
         return "image/heic"
-    if sig[:4] == b"%PDF":
-        return "application/pdf"
+
+    # Fallback to Pillow inspection
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = (img.format or "").lower()
+            if fmt in ("jpeg", "jpg"):
+                return "image/jpeg"
+            if fmt:
+                return f"image/{fmt}"
+    except Exception:
+        pass
+
     return "application/octet-stream"
 
 
