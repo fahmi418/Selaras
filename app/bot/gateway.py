@@ -15,9 +15,16 @@ from app.bot.handlers.commands import (
     cmd_privasi,
     cmd_start,
     cmd_status,
+    handle_company_select_callback,
     handle_consent_callback,
+    handle_text_search,
 )
-from app.bot.handlers.slip_flow import handle_photo, handle_report_callback
+from app.bot.handlers.slip_flow import (
+    handle_action_callback,
+    handle_photo,
+    handle_report_callback,
+    handle_status_callback,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -58,12 +65,18 @@ async def build_application() -> Application:
     app.add_handler(CommandHandler("privasi", cmd_privasi))
     app.add_handler(CommandHandler("bantuan", cmd_bantuan))
 
-    # Photo messages
+    # Photo and Image Document messages
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
+
+    # Text messages (company name/NPP search & general inquiries)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_search))
 
     # Inline callbacks
     app.add_handler(CallbackQueryHandler(handle_consent_callback, pattern=r"^consent:"))
+    app.add_handler(CallbackQueryHandler(handle_company_select_callback, pattern=r"^company:select:"))
     app.add_handler(CallbackQueryHandler(handle_report_callback, pattern=r"^action:report:"))
+    app.add_handler(CallbackQueryHandler(handle_action_callback, pattern=r"^action:(ignore|explain):"))
+    app.add_handler(CallbackQueryHandler(handle_status_callback, pattern=r"^status:"))
 
     _application = app
     logger.info("Bot application configured successfully")

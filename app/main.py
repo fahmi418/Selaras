@@ -51,13 +51,29 @@ async def lifespan(app: FastAPI):
         bot_app = await build_application()
         await bot_app.initialize()
 
-        # Set webhook
-        webhook_url = f"{settings.app_base_url}/webhook/telegram"
-        await bot_app.bot.set_webhook(
-            url=webhook_url,
-            secret_token=settings.telegram_webhook_secret.get_secret_value(),
-        )
-        logger.info("telegram webhook set", url=webhook_url)
+        # Resolve public HTTPS base URL for Telegram Webhook
+        import os
+        domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL")
+        if domain:
+            base_url = f"https://{domain.replace('https://', '').replace('http://', '').strip('/')}"
+        elif settings.app_base_url.startswith("https://"):
+            base_url = settings.app_base_url.rstrip("/")
+        elif "railway.app" in settings.app_base_url:
+            base_url = settings.app_base_url.replace("http://", "https://").rstrip("/")
+        elif settings.demo_mode and "localhost" in settings.app_base_url:
+            base_url = "https://selaras-production.up.railway.app"
+        else:
+            base_url = settings.app_base_url.rstrip("/")
+
+        if base_url.startswith("https://"):
+            webhook_url = f"{base_url}/webhook/telegram"
+            await bot_app.bot.set_webhook(
+                url=webhook_url,
+                secret_token=settings.telegram_webhook_secret.get_secret_value(),
+            )
+            logger.info("telegram webhook set successfully", url=webhook_url)
+        else:
+            logger.warning("telegram webhook skipped: HTTPS URL is required by Telegram", base_url=base_url)
     except Exception as exc:
         logger.warning("telegram bot initialization skipped in demo mode", error=str(exc))
 

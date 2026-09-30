@@ -154,9 +154,32 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # Post-extraction validation
         validation = validate_extraction(extraction)
 
-        # Get company from user session context
-        company_id = context.user_data.get("selected_company_id", "UNKNOWN")
-        company_name = context.user_data.get("selected_company_name", "perusahaan Anda")
+        # Get company from user session context or auto-detect from slip extraction
+        company_id = context.user_data.get("selected_company_id")
+        company_name = context.user_data.get("selected_company_name")
+
+        if not company_id or company_id == "UNKNOWN":
+            from app.db.models import Company
+            from sqlalchemy import select
+
+            if extraction.employer_name and extraction.employer_name.value:
+                extracted_name = extraction.employer_name.value.strip()
+                comp_match = await session.execute(
+                    select(Company).where(Company.name.ilike(f"%{extracted_name}%")).limit(1)
+                )
+                comp = comp_match.scalar_one_or_none()
+                if comp:
+                    company_id = comp.company_id
+                    company_name = comp.name
+
+            if not company_id:
+                fallback_comp = (await session.execute(select(Company).limit(1))).scalar_one_or_none()
+                if fallback_comp:
+                    company_id = fallback_comp.company_id
+                    company_name = fallback_comp.name
+                else:
+                    company_id = "UNKNOWN"
+                    company_name = "Perusahaan Anda"
 
         # Get BPJS synthetic record (for demo: use company_id to fetch from DB)
         bpjs_record = await _get_bpjs_record(session, company_id, worker_hash)
@@ -262,6 +285,55 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
         "Petugas hanya akan bertindak jika ada bukti tambahan dari data. "
         "Nama Anda tidak pernah dibagikan. Anda bisa menghapus data kapan saja dengan /hapus."
     )
+
+
+async def handle_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle action:ignore and action:explain callbacks."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    parts = query.data.split(":")
+    action = parts[1] if len(parts) > 1 else ""
+    check_id = parts[2] if len(parts) > 2 else ""
+
+    if action == "ignore":
+        await query.edit_message_text("Pemeriksaan ini diabaikan dan tidak dilaporkan.")
+    elif action == "explain":
+        async with AsyncSessionLocal() as session:
+            check = await session.get(SlipCheck, check_id)
+            if check and check.extracted_json:
+                data = json.loads(check.extracted_json)
+                earnings = data.get("earnings", [])
+                deductions = data.get("deductions", [])
+
+                earn_text = "\n".join([f"• {e['label']}: Rp{e['amount']:,}" for e in earnings if e.get('amount')])
+                ded_text = "\n".join([f"• {d['label']}: Rp{d['amount']:,}" for d in deductions if d.get('amount')])
+
+                text = (
+                    "<b>Rincian Ekstraksi Slip Gaji:</b>\n\n"
+                    f"<b>Komponen Penghasilan:</b>\n{earn_text or '–'}\n\n"
+                    f"<b>Komponen Potongan:</b>\n{ded_text or '–'}\n\n"
+                    f"Dasar Upah: Rp{check.implied_wage_base or 0:,}\n"
+                    f"Potongan Terbaca: Rp{check.actual_deduction or 0:,}\n"
+                    f"Potongan Seharusnya (1%): Rp{check.expected_deduction or 0:,}"
+                )
+                await query.message.reply_html(text)
+            else:
+                await query.message.reply_text("Informasi rincian tidak tersedia.")
+
+
+async def handle_status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle status:* work status response callback."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    status_val = query.data.split(":", 1)[1]
+    status_display = status_val.replace("_", " ").title()
+    await query.edit_message_text(f"Status kerja dicatat: {status_display}. Terima kasih.")
 
 
 async def _get_bpjs_record(session, company_id: str, worker_hash: str) -> BPJSRecord:

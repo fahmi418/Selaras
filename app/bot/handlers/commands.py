@@ -191,3 +191,85 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
             "Tidak masalah. Anda bisa kembali kapan saja dengan /start.\n"
             "Kami tidak menyimpan data Anda tanpa persetujuan."
         )
+
+
+async def handle_text_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle text search when user types company name or NPP."""
+    if not update.message or not update.message.text:
+        return
+
+    text = update.message.text.strip()
+    if text.startswith("/"):
+        return
+
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select, or_
+        from app.db.models import Company
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        # Search by name or NPP (case-insensitive)
+        query = select(Company).where(
+            or_(
+                Company.name.ilike(f"%{text}%"),
+                Company.npp.ilike(f"%{text}%"),
+            )
+        ).limit(5)
+        res = await session.execute(query)
+        companies = res.scalars().all()
+
+        if not companies:
+            all_comp_res = await session.execute(select(Company).limit(4))
+            sample_companies = all_comp_res.scalars().all()
+            
+            buttons = [
+                [InlineKeyboardButton(f"{c.name} ({c.npp})", callback_data=f"company:select:{c.company_id}")]
+                for c in sample_companies
+            ]
+            await update.message.reply_text(
+                f"Perusahaan '{text}' tidak ditemukan di database contoh.\n\n"
+                "Pilih dari daftar contoh berikut atau langsung kirimkan foto slip gaji Anda:",
+                reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+            )
+            return
+
+        if len(companies) == 1:
+            comp = companies[0]
+            context.user_data["selected_company_id"] = comp.company_id
+            context.user_data["selected_company_name"] = comp.name
+            context.user_data["state"] = "READY_FOR_SLIP"
+            await update.message.reply_text(
+                f"Perusahaan dipilih: {comp.name} (NPP: {comp.npp})\n\n"
+                "Silakan kirimkan foto slip gaji Anda sekarang untuk diperiksa."
+            )
+        else:
+            buttons = [
+                [InlineKeyboardButton(f"{c.name} ({c.npp})", callback_data=f"company:select:{c.company_id}")]
+                for c in companies
+            ]
+            await update.message.reply_text(
+                f"Ditemukan {len(companies)} perusahaan. Pilih yang sesuai:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+
+
+async def handle_company_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user clicks a company button."""
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    await query.answer()
+
+    _, _, company_id = query.data.split(":", 2)
+    async with AsyncSessionLocal() as session:
+        from app.db.models import Company
+        comp = await session.get(Company, company_id)
+        if comp:
+            context.user_data["selected_company_id"] = comp.company_id
+            context.user_data["selected_company_name"] = comp.name
+            context.user_data["state"] = "READY_FOR_SLIP"
+            await query.edit_message_text(
+                f"Perusahaan dipilih: {comp.name} (NPP: {comp.npp})\n\n"
+                "Silakan kirimkan foto slip gaji Anda sekarang untuk diperiksa."
+            )
+        else:
+            await query.edit_message_text("Perusahaan tidak ditemukan. Silakan kirimkan foto slip gaji Anda.")
