@@ -425,6 +425,11 @@ def load_region_risk():
                 GROUP BY r.city, r.province
                 ORDER BY avg_risk DESC
             """), conn)
+            return df
+    except Exception:
+        return pd.DataFrame()
+
+
 @st.cache_data(ttl=60)
 def load_regions_list():
     engine = get_db_engine()
