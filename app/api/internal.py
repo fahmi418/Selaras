@@ -246,6 +246,44 @@ async def create_company(
         model_version="1.0.0",
     ))
 
+    # Auto-assign CaseFile to officer in this region so it immediately syncs to Officer Portal
+    from hashlib import sha256
+    import secrets
+    from app.db.models import Officer, CaseFile
+    off_res = await session.execute(select(Officer).where(Officer.region_id == payload.region_id).limit(1))
+    off = off_res.scalar_one_or_none()
+    if not off:
+        any_off = await session.execute(select(Officer).limit(1))
+        off = any_off.scalar_one_or_none()
+
+    tok_plain = secrets.token_urlsafe(16)
+    tok_hash = sha256(tok_plain.encode()).hexdigest()
+    reasons_list = [
+        {
+            "code": "AUTO_SYNC_REGISTRATION",
+            "title": f"Triangulasi Integritas Iuran — {company.name}",
+            "detail": f"Entitas baru terdaftar ({payload.registered_headcount} pekerja). Siap diverifikasi silang dengan laporan slip pekerja dan UMK.",
+            "weight": 0.6,
+        }
+    ]
+    checklist_list = [
+        "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan",
+        "Konfirmasi potongan 1% pekerja pada slip gaji",
+        "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan"
+    ]
+    session.add(CaseFile(
+        case_id=f"case-{uuid4().hex[:8]}",
+        company_id=company_id,
+        status="assigned",
+        priority=6500.0,
+        assigned_officer=off.officer_id if off else None,
+        due_date=date.today() + timedelta(days=2),
+        reasons_json=json.dumps(reasons_list),
+        checklist_json=json.dumps(checklist_list),
+        access_token_hash=tok_hash,
+        token_expires=datetime.utcnow() + timedelta(hours=24),
+    ))
+
     await write_audit(session, actor="admin", action="COMPANY_CREATE", object_ref=company_id, meta={"name": company.name, "npp": company.npp})
     await session.commit()
 

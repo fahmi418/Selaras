@@ -348,6 +348,56 @@ async def officer_portal(
         else:
             current_officer = officers[0]
 
+    # Auto-sync: Find any active companies in this officer's region that have no active case_file
+    unassigned_comps_res = await session.execute(
+        select(Company)
+        .where(
+            Company.status == "active",
+            Company.region_id == current_officer.region_id,
+            ~Company.company_id.in_(
+                select(CaseFile.company_id).where(CaseFile.status.in_(["pending", "assigned", "snoozed"]))
+            )
+        )
+    )
+    unassigned_comps = unassigned_comps_res.scalars().all()
+
+    for u_comp in unassigned_comps:
+        t_plain = secrets.token_urlsafe(16)
+        t_hash = sha256(t_plain.encode()).hexdigest()
+        c_id = f"case-{uuid4().hex[:8]}"
+        d_val = date.today() + timedelta(days=2)
+        
+        rs_res = await session.execute(
+            select(RiskScore).where(RiskScore.company_id == u_comp.company_id).order_by(RiskScore.as_of.desc()).limit(1)
+        )
+        rs_obj = rs_res.scalar_one_or_none()
+        r_val = rs_obj.risk if rs_obj else 60.0
+
+        session.add(CaseFile(
+            case_id=c_id,
+            company_id=u_comp.company_id,
+            status="assigned",
+            priority=float(r_val * 100),
+            assigned_officer=current_officer.officer_id,
+            due_date=d_val,
+            reasons_json=json.dumps([{
+                "code": "AUTO_SYNC_REGISTRATION",
+                "title": f"Triangulasi Integritas Iuran — {u_comp.name}",
+                "detail": f"Entitas aktif di wilayah {u_comp.region_id} ({u_comp.registered_headcount} pekerja). Siap diverifikasi silang.",
+                "weight": 0.6,
+            }]),
+            checklist_json=json.dumps([
+                "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan",
+                "Konfirmasi potongan 1% pekerja pada slip gaji",
+                "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan"
+            ]),
+            access_token_hash=t_hash,
+            token_expires=datetime.utcnow() + timedelta(hours=24),
+        ))
+
+    if unassigned_comps:
+        await session.commit()
+
     # Query assigned cases for this officer
     cases_res = await session.execute(
         select(CaseFile, Company, Region, RiskScore)

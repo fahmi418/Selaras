@@ -279,6 +279,62 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
             category=category,
         )
         session.add(report)
+
+        # Auto-sync/escalate CaseFile for this company
+        from app.db.models import CaseFile, Officer, Company
+        from hashlib import sha256
+        import secrets
+        from datetime import date, datetime, timedelta
+
+        case_res = await session.execute(
+            select(CaseFile).where(
+                CaseFile.company_id == check.company_id,
+                CaseFile.status.in_(["pending", "assigned", "snoozed"])
+            )
+        )
+        existing_case = case_res.scalar_one_or_none()
+        
+        comp_res = await session.execute(select(Company).where(Company.company_id == check.company_id))
+        comp = comp_res.scalar_one_or_none()
+
+        report_signal = {
+            "code": "WORKER_REPORT_SIGNAL",
+            "title": f"Laporan Slip Pekerja Terverifikasi ({category})",
+            "detail": f"Pekerja melaporkan slip gaji dengan indikasi selisih iuran ({category}).",
+            "weight": 0.9,
+        }
+
+        if existing_case:
+            existing_case.priority = max(existing_case.priority, 8500.0)
+            cur_reasons = json.loads(existing_case.reasons_json) if existing_case.reasons_json else []
+            cur_reasons.insert(0, report_signal)
+            existing_case.reasons_json = json.dumps(cur_reasons)
+        elif comp:
+            off_res = await session.execute(select(Officer).where(Officer.region_id == comp.region_id).limit(1))
+            off = off_res.scalar_one_or_none()
+            if not off:
+                any_off = await session.execute(select(Officer).limit(1))
+                off = any_off.scalar_one_or_none()
+
+            t_plain = secrets.token_urlsafe(16)
+            t_hash = sha256(t_plain.encode()).hexdigest()
+            session.add(CaseFile(
+                case_id=f"case-{uuid4().hex[:8]}",
+                company_id=comp.company_id,
+                status="assigned",
+                priority=8500.0,
+                assigned_officer=off.officer_id if off else None,
+                due_date=date.today() + timedelta(days=2),
+                reasons_json=json.dumps([report_signal]),
+                checklist_json=json.dumps([
+                    "Cocokkan potongan 1% pada slip pelapor dengan tagihan BPJS",
+                    "Bandingkan take-home pay dan upah pokok terlapor",
+                    "Konfirmasi jumlah pekerja sebenarnya di lokasi entitas"
+                ]),
+                access_token_hash=t_hash,
+                token_expires=datetime.utcnow() + timedelta(hours=24),
+            ))
+
         await write_audit(
             session, actor="anonymous", action="REPORT",
             object_ref=check.company_id,

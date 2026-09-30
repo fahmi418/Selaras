@@ -942,6 +942,44 @@ with tabs[4]:
                                     """), {
                                         "cid": comp_id, "today": today_str
                                     })
+
+                                    # Auto-assign CaseFile to officer in this region
+                                    off_row = conn.execute(
+                                        text("SELECT officer_id FROM officer WHERE region_id = :rid LIMIT 1"),
+                                        {"rid": region_id}
+                                    ).fetchone()
+                                    if not off_row:
+                                        off_row = conn.execute(text("SELECT officer_id FROM officer LIMIT 1")).fetchone()
+                                    target_off = off_row[0] if off_row else None
+
+                                    import secrets
+                                    from hashlib import sha256
+                                    tok_p = secrets.token_urlsafe(16)
+                                    tok_h = sha256(tok_p.encode()).hexdigest()
+                                    reasons_j = json.dumps([{
+                                        "code": "AUTO_SYNC_REGISTRATION",
+                                        "title": f"Triangulasi Integritas Iuran — {comp_name.strip()}",
+                                        "detail": f"Entitas baru terdaftar ({int(comp_headcount)} pekerja). Siap diverifikasi silang dengan laporan slip pekerja dan UMK.",
+                                        "weight": 0.6,
+                                    }])
+                                    chk_j = json.dumps([
+                                        "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan",
+                                        "Konfirmasi potongan 1% pekerja pada slip gaji",
+                                        "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan"
+                                    ])
+                                    due_d = (date.today() + timedelta(days=2)).isoformat()
+                                    conn.execute(text("""
+                                        INSERT INTO case_file (case_id, company_id, status, priority, assigned_officer, due_date, reasons_json, checklist_json, access_token_hash)
+                                        VALUES (:case_id, :cid, 'assigned', 6500.0, :off_id, :due_d, :reasons, :chk, :tok_h)
+                                    """), {
+                                        "case_id": f"case-{uuid4().hex[:8]}",
+                                        "cid": comp_id,
+                                        "off_id": target_off,
+                                        "due_d": due_d,
+                                        "reasons": reasons_j,
+                                        "chk": chk_j,
+                                        "tok_h": tok_h,
+                                    })
                                     success = True
                         except Exception as db_err:
                             error_msg = str(db_err)
