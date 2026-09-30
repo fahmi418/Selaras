@@ -21,7 +21,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./selaras.db")
 DB_PATH = DB_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
-API_BASE = os.getenv("APP_BASE_URL", "http://localhost:8000")
+API_BASE = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8001")
 ADMIN_KEY = os.getenv("ADMIN_API_KEY", "admin-dev-key-12345")
 
 st.set_page_config(
@@ -312,7 +312,7 @@ from sqlalchemy import create_engine, text
 # Configuration & Database Engine (PostgreSQL / SQLite)
 # ---------------------------------------------------------------------------
 RAW_DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./selaras.db")
-API_BASE = os.getenv("APP_BASE_URL", "http://localhost:8000")
+API_BASE = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8001")
 ADMIN_KEY = os.getenv("ADMIN_API_KEY", "admin-dev-key-12345")
 
 
@@ -467,7 +467,7 @@ st.markdown(f"""
     <span>Live Database (<code>{DB_TYPE_NAME}</code>) — Sinkronisasi otomatis & responsif terhadap mutasi data</span>
   </div>
   <div class="header-quick-links">
-    <a href="{API_BASE}/portal" target="_blank" class="header-btn">
+    <a href="/portal" target="_blank" class="header-btn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
         <circle cx="9" cy="7" r="4"></circle>
@@ -475,7 +475,7 @@ st.markdown(f"""
       </svg>
       Portal Petugas
     </a>
-    <a href="{API_BASE}/verify" target="_blank" class="header-btn">
+    <a href="/verify" target="_blank" class="header-btn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
@@ -582,7 +582,7 @@ with tabs[1]:
         <p style="font-size: 13px; color: #858585; margin: 2px 0 0 0;">Disusun berbasis optimasi Greedy Knapsack harian dengan alokasi kuota petugas</p>
       </div>
       <div>
-        <a href="http://127.0.0.1:8000/portal" target="_blank" class="header-btn" style="background-color: #244d54; color: #ffffff; border-color: #244d54;">
+        <a href="/portal" target="_blank" class="header-btn" style="background-color: #244d54; color: #ffffff; border-color: #244d54;">
           Buka Antrean di Portal Petugas
         </a>
       </div>

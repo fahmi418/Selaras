@@ -49,23 +49,30 @@ def _format_idr(val: int | float | None) -> str:
 
 async def _get_case_by_token(token: str, session: AsyncSession) -> CaseFile:
     """Validate token and return CaseFile, raising 403/410 on invalid/expired."""
-    token_hash = sha256(token.encode()).hexdigest()
+    token_clean = token.strip()
+    token_hash = sha256(token_clean.encode()).hexdigest()
     result = await session.execute(
         select(CaseFile).where(CaseFile.access_token_hash == token_hash)
     )
     case = result.scalar_one_or_none()
 
     if not case:
-        # Robust demo fallback: allow matching by case_id if token is direct ID
         from app.config import get_settings
         if get_settings().demo_mode:
-            case_by_id = (await session.execute(select(CaseFile).where(CaseFile.case_id == token))).scalar_one_or_none()
+            # 1. Match by case_id
+            case_by_id = (await session.execute(select(CaseFile).where(CaseFile.case_id == token_clean))).scalar_one_or_none()
             if case_by_id:
                 return case_by_id
-        raise HTTPException(status_code=403, detail="Token tidak valid atau telah digunakan.")
+            # 2. Match first available case in demo mode
+            any_case = (await session.execute(select(CaseFile).order_by(CaseFile.priority.desc()).limit(1))).scalar_one_or_none()
+            if any_case:
+                return any_case
+        raise HTTPException(status_code=403, detail="Token tidak valid atau telah digunakan. Silakan buka kembali dari Portal Petugas (/portal).")
 
     if case.token_expires and case.token_expires < datetime.utcnow():
-        raise HTTPException(status_code=410, detail="Token telah kedaluwarsa (berlaku 24 jam).")
+        from app.config import get_settings
+        if not get_settings().demo_mode:
+            raise HTTPException(status_code=410, detail="Token telah kedaluwarsa (berlaku 24 jam).")
 
     return case
 
@@ -77,6 +84,16 @@ async def case_page(
     session: AsyncSession = Depends(get_db),
 ):
     case = await _get_case_by_token(token, session)
+
+    # In demo mode, ensure active token is always available for write actions
+    import secrets
+    from datetime import datetime, timedelta
+    active_token = token
+    if not case.access_token_hash or (case.token_expires and case.token_expires < datetime.utcnow()):
+        active_token = secrets.token_urlsafe(16)
+        case.access_token_hash = sha256(active_token.encode()).hexdigest()
+        case.token_expires = datetime.utcnow() + timedelta(hours=24)
+        await session.commit()
 
     company_result = await session.execute(
         select(Company, Region)
@@ -217,7 +234,7 @@ async def case_page(
             "checklist": checklist,
             "tri": tri,
             "history": history,
-            "token": token,
+            "token": active_token,
         },
     )
 
