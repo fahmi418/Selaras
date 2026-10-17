@@ -51,7 +51,7 @@ TELEGRAM_WEBHOOK_SECRET=local-dev-secret-token
 
 # Gemini LLM API (Google AI Studio)
 GEMINI_API_KEY=AIzaSyYourActualOrDummyKey
-GEMINI_MODEL=gemini-1.5-flash-latest
+GEMINI_MODEL=gemini-3.8-flash
 
 # Database SQLite (atau postgresql+asyncpg://...)
 DATABASE_URL=sqlite+aiosqlite:///./selaras.db
@@ -136,7 +136,7 @@ curl -X POST http://localhost:8000/admin/jobs/run/queue -H "X-API-Key: admin-dev
 ```bash
 pytest tests/ app/rules/tests/ -v
 ```
-Seluruh 40 tes unit dan rute web dipastikan lulus (100% PASS).
+Seluruh tes (unit, rute web, auth, bot, dashboard) dipastikan lulus.
 
 ### Menjalankan Evaluasi Simulasi 30 Hari
 Untuk mengukur metrik presisi, recall, dan lift rasio terhadap 3 baseline:
