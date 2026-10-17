@@ -9,12 +9,18 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# Streamlit puts this file's folder on sys.path (not the repo root), so import the sibling module directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import regional  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration & Paths
@@ -22,7 +28,10 @@ import streamlit as st
 DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./selaras.db")
 DB_PATH = DB_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
 API_BASE = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8001")
-ADMIN_KEY = os.getenv("ADMIN_API_KEY", "admin-dev-key-12345")
+# The published dev key is only a local convenience; outside demo mode the key must come from the environment.
+ADMIN_KEY = os.getenv("ADMIN_API_KEY") or (
+    "admin-dev-key-12345" if os.getenv("DEMO_MODE", "true").lower() == "true" else ""
+)
 
 st.set_page_config(
     page_title="Selaras — Dashboard Pengawasan JKN",
@@ -313,7 +322,6 @@ from sqlalchemy import create_engine, text
 # ---------------------------------------------------------------------------
 RAW_DB_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./selaras.db")
 API_BASE = os.getenv("INTERNAL_API_URL", "http://127.0.0.1:8001")
-ADMIN_KEY = os.getenv("ADMIN_API_KEY", "admin-dev-key-12345")
 
 
 def _get_sync_db_url(raw_url: str) -> str:
@@ -406,26 +414,23 @@ def load_queue_df():
 
 
 @st.cache_data(ttl=15)
-def load_region_risk():
+def load_company_risk_df():
+    """One row per active company with its LATEST risk score (NULL when never scored)."""
     engine = get_db_engine()
     try:
         with engine.connect() as conn:
-            df = pd.read_sql_query(text("""
-                SELECT r.city AS wilayah, r.province,
-                       ROUND(AVG(rs.risk), 1) AS avg_risk,
-                       COUNT(DISTINCT cf.case_id) AS active_cases,
-                       COUNT(DISTINCT c.company_id) AS companies,
-                       ROUND(SUM(rs.est_mid) / 1000000.0, 1) AS total_est_jt
-                FROM region r
-                JOIN company c ON c.region_id = r.region_id
+            return pd.read_sql_query(text("""
+                SELECT c.company_id, c.region_id, r.city AS wilayah, r.province, c.sector,
+                       rs.risk, rs.est_mid,
+                       (SELECT COUNT(*) FROM case_file cf
+                         WHERE cf.company_id = c.company_id
+                           AND cf.status IN ('pending','assigned','snoozed')) AS active_cases
+                FROM company c
+                JOIN region r ON r.region_id = c.region_id
                 LEFT JOIN risk_score rs ON rs.company_id = c.company_id
-                    AND rs.as_of = (SELECT MAX(as_of) FROM risk_score)
-                LEFT JOIN case_file cf ON cf.company_id = c.company_id
-                    AND cf.status IN ('pending','assigned')
-                GROUP BY r.city, r.province
-                ORDER BY avg_risk DESC
+                    AND rs.as_of = (SELECT MAX(as_of) FROM risk_score WHERE company_id = c.company_id)
+                WHERE c.status = 'active'
             """), conn)
-            return df
     except Exception:
         return pd.DataFrame()
 
@@ -690,41 +695,110 @@ with tabs[2]:
     </div>
     """, unsafe_allow_html=True)
 
-    reg_df = load_region_risk()
+    def _chart_title(title: str, insight: str) -> None:
+        st.markdown(f"""
+        <div style="margin: 4px 0 6px 0;">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: #858585; font-weight: 600;">{title}</div>
+          <div style="font-size: 14px; color: #151515; line-height: 1.4; margin-top: 2px;">{insight}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    if not reg_df.empty:
-        fig = px.bar(
-            reg_df,
-            x="wilayah",
-            y="avg_risk",
-            color="avg_risk",
-            color_continuous_scale=[[0, "#6dddbd"], [0.5, "#2ecea0"], [1, "#244d54"]],
-            labels={"avg_risk": "Rata-rata Skor Risiko", "wilayah": "Kabupaten / Kota"},
-        )
-        fig.update_layout(
-            showlegend=False,
-            plot_bgcolor="#ffffff",
-            paper_bgcolor="#ffffff",
-            font={"family": "Inter Tight, sans-serif", "color": "#151515"},
-            margin=dict(l=20, r=20, t=20, b=20),
-            coloraxis_showscale=False,
-            xaxis=dict(gridcolor="#e5e7eb", linecolor="#e5e7eb"),
-            yaxis=dict(gridcolor="#e5e7eb", linecolor="#e5e7eb"),
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    company_risk_df = load_company_risk_df()
 
-        st.dataframe(
-            reg_df.rename(columns={
-                "wilayah": "Wilayah",
-                "province": "Provinsi",
-                "avg_risk": "Rata-rata Skor Risiko",
-                "active_cases": "Kasus Aktif",
-                "companies": "Total Entitas",
-                "total_est_jt": "Est. Total Gap (Juta Rp)",
-            }),
-            use_container_width=True,
-            hide_index=True,
+    if company_risk_df.empty:
+        st.markdown("""
+        <div class="card-bone" style="text-align: center; color: #858585;">
+          Belum ada data badan usaha aktif untuk dipetakan per wilayah.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        provinces = sorted(company_risk_df["province"].dropna().unique())
+        selected_provinces = st.multiselect("Filter Provinsi", provinces, key="reg_province_filter")
+        view_df = (
+            company_risk_df[company_risk_df["province"].isin(selected_provinces)]
+            if selected_provinces else company_risk_df
         )
+
+        thresholds = regional.load_thresholds()
+        reg = regional.aggregate_regions(view_df, thresholds)
+
+        top_region = reg.iloc[0]["wilayah"] if reg["total_gap"].sum() > 0 else "-"
+        reg_kpis = [
+            ("Wilayah Terpantau", f"{len(reg)}", f"{int(reg['entities'].sum())} badan usaha aktif", False),
+            ("Potensi Gap Terbesar", top_region, "Wilayah dengan estimasi tertinggi", True),
+            ("Total Potensi Gap", regional.fmt_idr_jt(reg["total_gap"].sum()), "Per bulan, seluruh wilayah terpilih", False),
+            ("Berisiko Tinggi", f"{int(reg['Tinggi'].sum())}", f"Dari {int(reg['scored'].sum())} entitas yang dinilai", False),
+        ]
+        for col, (label, val, sub, small) in zip(st.columns(4), reg_kpis):
+            with col:
+                numeral_style = "font-size: 22px; line-height: 1.5;" if small else ""
+                st.markdown(f"""
+                <div class="stat-block">
+                  <div class="stat-block-label">{label}</div>
+                  <div class="stat-numeral" style="{numeral_style}">{val}</div>
+                  <div class="stat-sublabel">{sub}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
+
+        chart_config = {"displayModeBar": False}
+        map_col, rank_col = st.columns([1.15, 1])
+
+        with map_col:
+            _chart_title("Peta sebaran wilayah", "Ukuran gelembung = potensi gap; warna = rata-rata skor risiko.")
+            map_fig, map_missing = regional.fig_region_map(reg)
+            if map_fig is not None:
+                st.plotly_chart(map_fig, use_container_width=True, config=chart_config)
+            else:
+                st.caption("Peta belum dapat ditampilkan: belum ada wilayah bernilai risiko dan berkoordinat.")
+            if map_missing:
+                st.caption("Tidak tampil di peta (belum dinilai atau tanpa koordinat): " + ", ".join(sorted(set(map_missing))))
+
+        with rank_col:
+            _chart_title("Peringkat potensi pemulihan iuran", regional.headline_gap(reg))
+            st.plotly_chart(regional.fig_gap_ranking(reg), use_container_width=True, config=chart_config)
+
+        mix_col, heat_col = st.columns(2)
+
+        with mix_col:
+            _chart_title("Komposisi tingkat risiko", regional.headline_risk(reg))
+            st.plotly_chart(regional.fig_risk_composition(reg), use_container_width=True, config=chart_config)
+
+        with heat_col:
+            matrix = regional.sector_matrix(view_df)
+            if matrix.empty:
+                _chart_title("Titik panas wilayah x sektor", "Belum ada skor risiko untuk dipetakan per sektor.")
+            else:
+                hot = matrix.stack().idxmax()
+                _chart_title(
+                    "Titik panas wilayah x sektor",
+                    f"Skor rata-rata tertinggi: {hot[0]} / {hot[1].upper()} ({matrix.stack().max():.0f}). Sel kosong = belum ada entitas dinilai.",
+                )
+                st.plotly_chart(regional.fig_sector_heatmap(matrix), use_container_width=True, config=chart_config)
+
+        with st.expander("Lihat sebagai tabel"):
+            st.dataframe(
+                reg.rename(columns={
+                    "wilayah": "Wilayah",
+                    "province": "Provinsi",
+                    "entities": "Total Entitas",
+                    "scored": "Sudah Dinilai",
+                    "avg_risk": "Rata-rata Skor Risiko",
+                    "total_gap": "Est. Total Gap / Bulan (Rp)",
+                    "active_cases": "Kasus Aktif",
+                    "share_gap": "Porsi Gap",
+                }).drop(columns=["region_id"]),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Porsi Gap": st.column_config.NumberColumn(format="percent"),
+                    "Est. Total Gap / Bulan (Rp)": st.column_config.NumberColumn(format="localized"),
+                },
+            )
+            if not matrix.empty:
+                st.caption("Rata-rata skor risiko per wilayah dan sektor")
+                st.dataframe(matrix, use_container_width=True)
 
 
 # ===========================================================================

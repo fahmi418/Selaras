@@ -45,7 +45,7 @@ dependencies = [
     "apscheduler>=3.10.4",
     # Dashboard
     "streamlit>=1.35.0",
-    "plotly>=5.22.0",
+    "plotly>=5.24.0",
     # Security
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.3.0",
