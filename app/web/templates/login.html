@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — Masuk Petugas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body>
+  <main class="login-wrap">
+    <form class="card login-card" method="post" action="/login">
+      <div class="login-brand">
+        <span class="icon icon-md" style="color: var(--color-mint-pulse);" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        </span>
+        SELARAS
+      </div>
+      <h1 class="login-title">Masuk Portal Petugas</h1>
+      <p class="login-help">Antrean kasus dan dashboard hanya untuk petugas BPJS Kesehatan.</p>
+
+      {% if error %}
+        <div class="alert-error" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="form-group">
+        <label class="form-label" for="password">Kata sandi</label>
+        <input type="password" id="password" name="password" class="form-control"
+               autocomplete="current-password" required autofocus>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Masuk</button>
+    </form>
+  </main>
+</body>
+</html>

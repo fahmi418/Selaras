@@ -19,6 +19,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,8 @@ from app.db.models import (
     WorkerReport,
 )
 from app.db.session import get_db
+from app.web.auth import auth_enabled, require_login
+from app.web.triangulation import build_triangulation
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
@@ -46,6 +49,17 @@ def _format_idr(val: int | float | None) -> str:
     if val is None:
         return "Rp 0"
     return f"Rp {int(val):,}".replace(",", ".")
+
+
+def _normalize_checklist(raw: list) -> list[dict]:
+    """Accept both legacy plain-string items and {"item", "required"} dicts."""
+    items = []
+    for entry in raw:
+        if isinstance(entry, str):
+            items.append({"item": entry, "required": False})
+        elif isinstance(entry, dict) and entry.get("item"):
+            items.append({"item": entry["item"], "required": bool(entry.get("required"))})
+    return items
 
 
 async def _get_case_by_token(token: str, session: AsyncSession) -> CaseFile:
@@ -117,14 +131,16 @@ async def case_page(
     score = score_result.scalar_one_or_none()
 
     reasons = json.loads(case.reasons_json) if case.reasons_json else []
-    checklist = json.loads(case.checklist_json) if case.checklist_json else []
+    checklist = _normalize_checklist(json.loads(case.checklist_json) if case.checklist_json else [])
 
     # Risk level styling
     from app.config import get_rules
     rules = get_rules()
     labels = rules.risk_labels
     risk_val = score.risk if score else 0
-    if risk_val >= labels["high"]:
+    if score is None:
+        risk_label, risk_color = "Belum dinilai", "gray"
+    elif risk_val >= labels["high"]:
         risk_label, risk_color = "Tinggi", "red"
     elif risk_val >= labels["medium"]:
         risk_label, risk_color = "Sedang", "orange"
@@ -133,9 +149,9 @@ async def case_page(
 
     # Estimation strings
     est_str = "–"
-    est_mid_formatted = "Rp 0"
-    est_12m_formatted = "Rp 0"
-    if score and score.est_low is not None and score.est_high is not None:
+    est_mid_formatted = "–"
+    est_12m_formatted = "–"
+    if score and score.est_low is not None and score.est_high is not None and score.est_mid is not None:
         def _fmt(n):
             return f"Rp{n // 1_000_000:.1f} jt" if n >= 1_000_000 else f"Rp{n // 1_000} rb"
         est_str = f"{_fmt(score.est_low)} – {_fmt(score.est_high)}"
@@ -145,7 +161,7 @@ async def case_page(
     # 1-sentence layman summary (PRD §14.1 butir 2)
     signals = json.loads(score.signals_json) if score and score.signals_json else {}
     if signals.get("C1_under_reporting", 0) >= 0.4:
-        summary_sentence = "Indikasi upah dilaporkan 30–50% lebih rendah dari slip gaji riil pekerja; selisih potongan 1% dan setoran 4% terdeteksi konsisten."
+        summary_sentence = "Indikasi upah yang dilaporkan ke BPJS lebih rendah dari upah riil pada slip gaji pekerja, sehingga potongan 1% dan setoran 4% ikut lebih kecil."
     elif signals.get("C2_headcount_gap", 0) >= 0.4:
         summary_sentence = "Indikasi pendaftaran pekerja sebagian; estimasi pekerja fisik aktif di lapangan melampaui jumlah tenaga kerja terdaftar pada sistem BPJS."
     elif signals.get("C3_remit_inconsistent", 0) >= 0.3:
@@ -173,69 +189,34 @@ async def case_page(
         )
     )
     benchmark = bench_result.scalar_one_or_none()
-    benchmark_wage = benchmark.median_wage if benchmark else region.umk
+    benchmark_wage = benchmark.median_wage if benchmark else region.umk  # UMK is the stated fallback benchmark
 
-    # Sample reported wage from enrollment or company estimates
+    # Reported wage on record at BPJS (None when the company has no enrollment rows)
     avg_enroll_res = await session.execute(
         select(func.avg(Enrollment.reported_wage_base))
         .where(Enrollment.company_id == company.company_id)
     )
     avg_wage_val = avg_enroll_res.scalar()
 
-    if latest_slip:
-        ext = json.loads(latest_slip.extracted_json) if latest_slip.extracted_json else {}
-        implied_wage = latest_slip.implied_wage_base or ext.get("base_wage") or (5_600_000 if "Cipta" in company.name else 5_000_000)
-        
-        actual_ded = latest_slip.actual_deduction
-        if actual_ded and actual_ded > 0:
-            reported_wage = int(actual_ded * 100)
-            worker_rep = int(actual_ded)
-        else:
-            reported_wage = int(avg_wage_val) if avg_wage_val else int(region.umk * 0.95)
-            worker_rep = round(reported_wage * 0.01)
-
-        worker_imp = round(implied_wage * 0.01)
-        employer_rep = round(reported_wage * 0.04)
-        employer_imp = round(implied_wage * 0.04)
-        worker_gap = (worker_imp + employer_imp) - (worker_rep + employer_rep)
-        compliance_pct = min(100, max(10, round((reported_wage / implied_wage) * 100)))
-    else:
-        reported_wage = int(avg_wage_val) if avg_wage_val else int(region.umk * 0.95)
-        if signals.get("C1_under_reporting", 0) >= 0.2:
-            implied_wage = int(reported_wage * 1.45)
-        else:
-            implied_wage = int(reported_wage * 1.15)
-
-        worker_rep = round(reported_wage * 0.01)
-        worker_imp = round(implied_wage * 0.01)
-        employer_rep = round(reported_wage * 0.04)
-        employer_imp = round(implied_wage * 0.04)
-        worker_gap = (worker_imp + employer_imp) - (worker_rep + employer_rep)
-        compliance_pct = min(100, max(20, round((reported_wage / implied_wage) * 100)))
-
-    tri = {
-        "reported_wage_fmt": _format_idr(reported_wage),
-        "implied_wage_fmt": _format_idr(implied_wage),
-        "benchmark_wage_fmt": _format_idr(benchmark_wage),
-        "worker_rep_fmt": _format_idr(worker_rep),
-        "worker_imp_fmt": _format_idr(worker_imp),
-        "employer_rep_fmt": _format_idr(employer_rep),
-        "employer_imp_fmt": _format_idr(employer_imp),
-        "worker_gap_fmt": _format_idr(worker_gap),
-        "compliance_pct": compliance_pct,
-    }
+    tri = build_triangulation(
+        reported_wage=avg_wage_val,
+        slip_expected_deduction=latest_slip.expected_deduction if latest_slip else None,
+        slip_actual_deduction=latest_slip.actual_deduction if latest_slip else None,
+        benchmark_wage=benchmark_wage,
+        rules=rules,
+    )
+    tri["slip_period"] = latest_slip.period if latest_slip else None
 
     # Format reasons so source and evidence are always clearly displayed
     formatted_reasons = []
     for r in reasons:
         r_title = r.get("title", "Indikasi Diskrepansi Upah")
         r_source = r.get("source") or ("Laporan Mandiri Slip Pekerja" if "Laporan" in r_title else "Data Kepesertaan BPJS")
-        r_evidence = r.get("evidence") or r.get("detail")
-        if not r_evidence:
-            if latest_slip and "Laporan" in r_title:
-                r_evidence = f"Slip gaji riil terbaca take-home pay {_format_idr(implied_wage)} dengan potongan BPJS 1% hanya {_format_idr(worker_rep)} (indikasi upah dilaporkan {_format_idr(reported_wage)} vs riil {_format_idr(implied_wage)})."
-            else:
-                r_evidence = f"Verifikasi silang triangulasi antara profil pelaporan entitas dan standar UMK wilayah ({_format_idr(region.umk)})."
+        r_evidence = (
+            r.get("evidence")
+            or r.get("detail")
+            or "Sinyal terdeteksi dari data kepesertaan dan setoran; lihat tabel triangulasi di bawah."
+        )
         formatted_reasons.append({
             "title": r_title,
             "source": r_source,
@@ -372,6 +353,7 @@ async def officer_portal(
     request: Request,
     officer_id: Optional[str] = Query(default=None),
     session: AsyncSession = Depends(get_db),
+    _: None = Depends(require_login),
 ):
     """Officer Queue Portal — shows today's assigned cases, workload, and direct case links."""
     # Fetch officers list
@@ -432,9 +414,9 @@ async def officer_portal(
                 "weight": 0.6,
             }]),
             checklist_json=json.dumps([
-                "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan",
-                "Konfirmasi potongan 1% pekerja pada slip gaji",
-                "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan"
+                {"item": "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan", "required": True},
+                {"item": "Konfirmasi potongan 1% pekerja pada slip gaji", "required": True},
+                {"item": "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan", "required": True},
             ]),
             access_token_hash=t_hash,
             token_expires=datetime.utcnow() + timedelta(hours=24),
@@ -444,11 +426,23 @@ async def officer_portal(
         await session.commit()
 
     # Query assigned cases for this officer
+    # Join only the latest RiskScore per company; RiskScore keeps one row per as_of date,
+    # so a plain join would repeat each case once per historical score.
+    latest_score = (
+        select(RiskScore.company_id, func.max(RiskScore.as_of).label("max_as_of"))
+        .group_by(RiskScore.company_id)
+        .subquery()
+    )
     cases_res = await session.execute(
         select(CaseFile, Company, Region, RiskScore)
         .join(Company, Company.company_id == CaseFile.company_id)
         .join(Region, Region.region_id == Company.region_id)
-        .outerjoin(RiskScore, RiskScore.company_id == Company.company_id)
+        .outerjoin(latest_score, latest_score.c.company_id == Company.company_id)
+        .outerjoin(
+            RiskScore,
+            (RiskScore.company_id == latest_score.c.company_id)
+            & (RiskScore.as_of == latest_score.c.max_as_of),
+        )
         .where(CaseFile.assigned_officer == current_officer.officer_id)
         .order_by(CaseFile.priority.desc())
     )
@@ -457,7 +451,14 @@ async def officer_portal(
     today_str = datetime.now().strftime("%A, %d %B %Y")
     cases_data = []
     total_est_mid = 0
+    cases_without_estimate = 0
     high_priority_count = 0
+
+    from app.config import get_rules
+    rules = get_rules()
+    risk_labels = rules.risk_labels
+    visit_hours = float(rules.planner["default_visit_hours"])
+    open_cases = 0
 
     for case, comp, reg, score in rows:
         # Ensure an active token exists for each case so the officer can click it
@@ -466,17 +467,25 @@ async def officer_portal(
         case.access_token_hash = token_hash
         case.token_expires = datetime.utcnow() + timedelta(hours=24)
 
-        est_mid = score.est_mid if score and score.est_mid else 12_500_000
-        total_est_mid += est_mid
+        # No score yet means no estimate and no risk label; never substitute a made-up figure.
+        est_mid = score.est_mid if score and score.est_mid else None
+        if est_mid is None:
+            cases_without_estimate += 1
+        else:
+            total_est_mid += est_mid
 
-        risk_val = score.risk if score else (case.priority / 100 if case.priority else 65)
-        if risk_val >= 70:
+        if score is None:
+            risk_label = "Belum dinilai"
+        elif score.risk >= risk_labels["high"]:
             risk_label = "Tinggi"
             high_priority_count += 1
-        elif risk_val >= 40:
+        elif score.risk >= risk_labels["medium"]:
             risk_label = "Sedang"
         else:
             risk_label = "Rendah"
+
+        if case.status in ("pending", "assigned", "snoozed"):
+            open_cases += 1
 
         reasons = json.loads(case.reasons_json) if case.reasons_json else []
         top_reason_text = reasons[0]["title"] if reasons else "Indikasi diskrepansi upah"
@@ -489,7 +498,7 @@ async def officer_portal(
             "city": reg.city,
             "registered_headcount": comp.registered_headcount,
             "risk_label": risk_label,
-            "est_mid_fmt": _format_idr(est_mid),
+            "est_mid_fmt": _format_idr(est_mid) if est_mid is not None else None,
             "top_signal_text": top_reason_text,
             "due_date": case.due_date.strftime("%d %b %Y") if case.due_date else "Hari Ini",
             "status": case.status,
@@ -498,7 +507,8 @@ async def officer_portal(
 
     await session.commit()
 
-    hours_used = min(current_officer.daily_hours, round(len(cases_data) * 1.8, 1))
+    # Planned workload: open cases x the planner's default visit duration (rules.yaml).
+    hours_used = round(open_cases * visit_hours, 1)
 
     return templates.TemplateResponse(
         request=request,
@@ -510,7 +520,10 @@ async def officer_portal(
             "cases": cases_data,
             "total_est_mid_fmt": _format_idr(total_est_mid),
             "high_priority_count": high_priority_count,
+            "cases_without_estimate": cases_without_estimate,
             "hours_used": hours_used,
+            "visit_hours": visit_hours,
+            "auth_enabled": auth_enabled(),
         },
     )
 
@@ -523,3 +536,47 @@ async def officer_portal(
 async def slip_verify_page(request: Request):
     """Worker Payslip Verification Web Demo page."""
     return templates.TemplateResponse(request=request, name="verify.html", context={})
+
+
+class VerifyEvaluateRequest(BaseModel):
+    base_wage: int = Field(ge=0, le=1_000_000_000)
+    allowance: int = Field(default=0, ge=0, le=1_000_000_000)
+    deduction: int = Field(ge=0, le=1_000_000_000)
+    recorded_wage: Optional[int] = Field(default=None, ge=0, le=1_000_000_000)
+    umk: int = Field(default=3_000_000, ge=0, le=1_000_000_000)
+    is_registered: bool = True
+    is_remitted: Optional[bool] = None
+
+
+@router.post("/verify/evaluate")
+async def slip_verify_evaluate(payload: VerifyEvaluateRequest):
+    """
+    Stateless rule-engine run for the /verify lab. Stores nothing and needs no API key:
+    it only does arithmetic on the numbers the visitor typed in.
+    """
+    from app.rules.engine import BPJSRecord, verdict_slip
+    from app.slip.schema import PayslipExtraction
+
+    fixed = [{"label": "Tunjangan Tetap", "amount": payload.allowance, "confidence": 1.0}] if payload.allowance else []
+    extraction = PayslipExtraction.model_validate({
+        "is_payslip": True,
+        "earnings": [{"label": "Gaji Pokok", "amount": payload.base_wage, "confidence": 1.0}, *fixed],
+        "deductions": [{"label": "BPJS Kesehatan", "amount": payload.deduction, "confidence": 1.0}],
+    })
+    result = verdict_slip(
+        extraction,
+        BPJSRecord(
+            recorded_wage_base=payload.recorded_wage or None,
+            is_remitted=payload.is_remitted,
+            is_registered=payload.is_registered,
+        ),
+        payload.umk,
+    )
+    return {
+        "verdicts": result.codes,
+        "expected_deduction": result.expected_deduction,
+        "actual_deduction": result.actual_deduction,
+        "wage_base_used": result.wage_base_used,
+        "explanation": result.explanation,
+        "rule_version": result.rule_version,
+    }

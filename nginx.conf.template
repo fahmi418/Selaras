@@ -7,6 +7,8 @@ http {
     default_type application/octet-stream;
     sendfile on;
     client_max_body_size 50M;
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
 
     access_log /dev/stdout;
     error_log /dev/stderr info;
@@ -21,8 +23,27 @@ http {
 
         server_name _;
 
-        # Streamlit Dashboard & WebSocket
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+        add_header X-Frame-Options SAMEORIGIN always;
+
+        # Session check against FastAPI; 204 = logged in (or login disabled), 401 = not logged in.
+        location = /_auth {
+            internal;
+            proxy_pass http://127.0.0.1:8001/auth/check;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Cookie $http_cookie;
+        }
+
+        location @login {
+            return 302 /login?next=/dashboard/;
+        }
+
+        # Streamlit Dashboard & WebSocket (login required)
         location /dashboard {
+            auth_request /_auth;
+            error_page 401 = @login;
             proxy_pass http://127.0.0.1:8501;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;

@@ -146,25 +146,36 @@
   }
 
   // --------------------------------------------------------------------------
-  // 4. Drawer & Modal Management
+  // 4. Drawer & Modal Management (focus, Escape, Tab trap)
   // --------------------------------------------------------------------------
   const outcomeDrawer = document.getElementById('outcome-drawer');
   const openOutcomeBtn = document.getElementById('btn-open-outcome');
   const closeOutcomeBtns = document.querySelectorAll('[data-close-drawer]');
+  const reasonDrawer = document.getElementById('reason-drawer');
+  let lastFocused = null;
 
-  function openOutcomeModal() {
-    if (outcomeDrawer) {
-      outcomeDrawer.classList.add('active');
-      document.body.style.overflow = 'hidden';
-    }
+  const FOCUSABLE = 'select, textarea, input:not([type="hidden"]), button:not([disabled]), a[href]';
+
+  function openSheet(sheet) {
+    if (!sheet) return;
+    lastFocused = document.activeElement;
+    sheet.classList.add('active');
+    sheet.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    const first = sheet.querySelector(FOCUSABLE);
+    if (first) setTimeout(() => first.focus(), 60);
   }
 
-  function closeOutcomeModal() {
-    if (outcomeDrawer) {
-      outcomeDrawer.classList.remove('active');
-      document.body.style.overflow = '';
-    }
+  function closeSheet(sheet) {
+    if (!sheet) return;
+    sheet.classList.remove('active');
+    sheet.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+    if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
   }
+
+  function openOutcomeModal() { openSheet(outcomeDrawer); }
+  function closeOutcomeModal() { closeSheet(outcomeDrawer); }
 
   if (openOutcomeBtn) {
     openOutcomeBtn.addEventListener('click', openOutcomeModal);
@@ -179,6 +190,79 @@
       if (e.target === outcomeDrawer) {
         closeOutcomeModal();
       }
+    });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    const active = document.querySelector('.drawer-backdrop.active');
+    if (!active) return;
+
+    if (e.key === 'Escape') {
+      if (active === reasonDrawer) finishReason(null);
+      else closeSheet(active);
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const items = Array.from(active.querySelectorAll(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+
+  // Reason sheet: Promise-based replacement for window.prompt / window.confirm
+  const reasonForm = document.getElementById('form-reason');
+  const reasonInput = document.getElementById('reason-input');
+  const reasonError = document.getElementById('reason-error');
+  let reasonResolve = null;
+  let reasonRequired = false;
+
+  function askReason({ title, message, label, placeholder, required, confirmLabel }) {
+    return new Promise((resolve) => {
+      document.getElementById('reason-title').textContent = title;
+      document.getElementById('reason-message').textContent = message;
+      document.getElementById('reason-label').textContent = label;
+      document.getElementById('reason-confirm').textContent = confirmLabel;
+      reasonInput.placeholder = placeholder || '';
+      reasonInput.value = '';
+      reasonError.hidden = true;
+      reasonRequired = Boolean(required);
+      reasonResolve = resolve;
+      openSheet(reasonDrawer);
+    });
+  }
+
+  function finishReason(value) {
+    if (!reasonResolve) return;
+    const resolve = reasonResolve;
+    reasonResolve = null;
+    closeSheet(reasonDrawer);
+    resolve(value);
+  }
+
+  if (reasonForm) {
+    reasonForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const value = reasonInput.value.trim();
+      if (reasonRequired && !value) {
+        reasonError.textContent = 'Alasan wajib diisi.';
+        reasonError.hidden = false;
+        reasonInput.focus();
+        return;
+      }
+      finishReason(value);
+    });
+    document.getElementById('reason-cancel').addEventListener('click', () => finishReason(null));
+    reasonDrawer.addEventListener('click', (e) => {
+      if (e.target === reasonDrawer) finishReason(null);
     });
   }
 
@@ -212,12 +296,25 @@
     let reason = '';
 
     if (action === 'tunda') {
-      reason = prompt('Masukkan alasan penundaan kasus (contoh: Menunggu data slip tambahan):');
-      if (reason === null) return; // User cancelled
+      reason = await askReason({
+        title: 'Tunda Kasus',
+        message: 'Kasus akan ditandai ditunda.',
+        label: 'Alasan penundaan',
+        placeholder: 'Contoh: Menunggu data slip tambahan',
+        required: true,
+        confirmLabel: 'Tunda Kasus',
+      });
+      if (reason === null) return;
     } else if (action === 'bukan_prioritas') {
-      const confirmAction = confirm('Tandai kasus ini sebagai Bukan Prioritas? Tindakan ini akan menutup berkas kasus.');
-      if (!confirmAction) return;
-      reason = prompt('Masukkan catatan alasan non-prioritas (opsional):') || '';
+      reason = await askReason({
+        title: 'Tandai Bukan Prioritas',
+        message: 'Tindakan ini akan menutup berkas kasus.',
+        label: 'Catatan alasan (opsional)',
+        placeholder: '',
+        required: false,
+        confirmLabel: 'Tutup Kasus',
+      });
+      if (reason === null) return;
     }
 
     try {
@@ -304,6 +401,12 @@
     });
   }
 
+  function esc(value) {
+    const d = document.createElement('div');
+    d.textContent = String(value ?? '');
+    return d.innerHTML;
+  }
+
   function renderOutcomeSuccess(outcomeId, result, modus, amount) {
     const actionsDock = document.getElementById('case-action-dock');
     if (actionsDock) actionsDock.style.display = 'none';
@@ -327,11 +430,11 @@
             Kunjungan lapangan telah diverifikasi dan dicatat pada sistem audit BPJS Kesehatan.
           </p>
           <div style="font-size: var(--text-small); color: var(--color-graphite); line-height: 1.6;">
-            <div><strong>Hasil:</strong> ${result}</div>
-            ${modus ? `<div><strong>Modus Terkonfirmasi:</strong> Modus #${modus}</div>` : ''}
+            <div><strong>Hasil:</strong> ${esc(result)}</div>
+            ${modus ? `<div><strong>Modus Terkonfirmasi:</strong> Modus #${esc(modus)}</div>` : ''}
             <div><strong>Nilai Temuan:</strong> ${formattedAmount}</div>
             <div style="font-family: var(--font-mono); font-size: 11px; margin-top: var(--space-6); color: var(--color-slate);">
-              ID Berkas: ${outcomeId}
+              ID Berkas: ${esc(outcomeId)}
             </div>
           </div>
         </div>
@@ -361,10 +464,13 @@
       iconSvg = ICONS.alert;
     }
 
-    toast.innerHTML = `
-      <span class="icon icon-sm">${iconSvg}</span>
-      <span>${message}</span>
-    `;
+    const iconEl = document.createElement('span');
+    iconEl.className = 'icon icon-sm';
+    iconEl.setAttribute('aria-hidden', 'true');
+    iconEl.innerHTML = iconSvg;
+    const textEl = document.createElement('span');
+    textEl.textContent = message;
+    toast.append(iconEl, textEl);
 
     container.appendChild(toast);
 

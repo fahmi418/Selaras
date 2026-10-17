@@ -22,6 +22,17 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     settings = get_settings()
 
+    from app.config import insecure_settings
+    problems = insecure_settings(settings)
+    if problems and not settings.demo_mode:
+        raise RuntimeError(
+            "DEMO_MODE=false tetapi pengaturan keamanan belum aman: "
+            + ", ".join(problems)
+            + ". Isi dengan nilai acak yang kuat di environment (mis. Railway Variables)."
+        )
+    if problems:
+        logger.warning("demo mode with insecure settings (do not expose publicly)", settings=problems)
+
     # Initialize DB
     from app.db.session import create_tables
     await create_tables()
@@ -126,9 +137,18 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     # Mount routers
-    from app.web.routes import router as web_router
-    from app.api.internal import router as api_router
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
 
+    from app.api.internal import router as api_router
+    from app.web.auth import LoginRequired, router as auth_router
+    from app.web.routes import router as web_router
+
+    @app.exception_handler(LoginRequired)
+    async def _login_required(request: Request, exc: LoginRequired):
+        return RedirectResponse(f"/login?next={quote(exc.next_path, safe='/')}", status_code=303)
+
+    app.include_router(auth_router)
     app.include_router(web_router)
     app.include_router(api_router)
 

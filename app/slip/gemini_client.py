@@ -4,7 +4,7 @@ Multi-Provider Vision Extraction Client (Gemini -> NVIDIA NIM -> Demo Fallback).
 Design contract:
 - The vision model's ONLY job is to extract text into structured JSON.
 - It must NOT calculate, interpret law, or decide verdicts.
-- Primary provider: Google Gemini (gemini-1.5-flash / gemini-2.5-flash).
+- Primary provider: Google Gemini (model set by GEMINI_MODEL; gemini-1.5-* is retired).
 - Secondary fallback: NVIDIA NIM (OpenAI-compatible Vision endpoint e.g. LLaMA-3.2-11B-Vision).
 - Tertiary fallback: Deterministic extraction parser for offline/demo reliability.
 """
@@ -139,6 +139,12 @@ async def _extract_gemini(jpeg_bytes: bytes, settings) -> PayslipExtraction | No
         cleaned_json = _clean_json_markdown(response.text)
         data = json.loads(cleaned_json)
         return PayslipExtraction.model_validate(data)
+    except gapi_exc.NotFound as exc:
+        logger.error(
+            "Gemini model %r not found (retired or misspelled). Update GEMINI_MODEL: %s",
+            settings.gemini_model, exc,
+        )
+        return None
     except Exception as exc:
         logger.warning("Gemini extraction failed, attempting fallback: %s", exc)
         return None

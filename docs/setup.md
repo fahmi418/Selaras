@@ -162,3 +162,26 @@ docker-compose ps
 docker-compose down
 ```
 Layanan akan otomatis mengekspos port 8000 (FastAPI) dan port 8501 (Streamlit).
+
+---
+
+## Checklist sebelum demo publik / penjurian (Railway)
+
+Set variabel berikut di Railway (Variables), lalu redeploy. Buat tiap nilai acak dengan
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+| Variabel | Nilai |
+|---|---|
+| `DEMO_MODE` | `false` |
+| `ADMIN_API_KEY`, `INTERNAL_API_KEY`, `SECRET_KEY`, `TELEGRAM_WEBHOOK_SECRET` | nilai acak, minimal 16 karakter, bukan nilai default dari `.env.example` |
+| `PORTAL_PASSWORD` | kata sandi login petugas untuk `/portal` dan `/dashboard` |
+| `GEMINI_MODEL` | model aktif, lihat <https://ai.google.dev/gemini-api/docs/deprecations> (default kode: `gemini-3.8-flash`) |
+| `NVIDIA_NIM_MODEL` | opsional; cek ketersediaannya di build.nvidia.com |
+| `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `DATABASE_URL` | seperti sebelumnya |
+
+Catatan:
+
+- Dengan `DEMO_MODE=false`, aplikasi **menolak start** bila ada kunci yang masih bernilai default atau `PORTAL_PASSWORD` kosong (pesan error menyebut variabel yang bermasalah).
+- `DEMO_MODE=false` juga mematikan auto-seed, `/docs`, CORS `*`, dan bypass token di halaman kasus. Pastikan database Railway sudah berisi data demo sebelum itu.
+- `/dashboard` dilindungi lewat nginx `auth_request` ke `/auth/check`. Itu hanya berlaku pada image gabungan (`Dockerfile` + `start.sh`). `Dockerfile.dashboard` yang dipakai sendiri tidak punya login.
+- Webhook Telegram memakai `TELEGRAM_WEBHOOK_SECRET`; setelah diganti, webhook otomatis didaftarkan ulang saat start.

@@ -18,11 +18,12 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: SecretStr = Field(default=SecretStr(""))
-    gemini_model: str = "gemini-1.5-flash-latest"
+    # gemini-1.5-* was shut down; ai.google.dev/gemini-api/docs/deprecations lists 3.8 Flash for new projects.
+    gemini_model: str = "gemini-3.8-flash"
 
     # NVIDIA NIM (Vision fallback)
     nvidia_nim_api_key: SecretStr = Field(default=SecretStr(""))
-    nvidia_nim_model: str = "meta/muse-glimmer-30b"
+    nvidia_nim_model: str = "meta/llama-3.2-11b-vision-instruct"
     nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
 
     # Database
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     admin_api_key: SecretStr = Field(default=SecretStr("admin-dev-key-12345"))
     internal_api_key: SecretStr = Field(default=SecretStr("internal-dev-key-12345"))
 
+    # Officer login for /portal and /dashboard. Empty = no login (allowed only in demo_mode).
+    portal_password: SecretStr = Field(default=SecretStr(""))
+    session_ttl_hours: int = 12
+
     # Tokens
     case_token_ttl_hours: int = 24
 
@@ -45,6 +50,27 @@ class Settings(BaseSettings):
     # Mode
     demo_mode: bool = True
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+
+_INSECURE_VALUES = {
+    "admin-dev-key-12345",
+    "internal-dev-key-12345",
+    "selaras-secret-key-32chars-minimum-demo",
+    "selaras-tele-secret-999",
+    "selaras-webhook-secret-token",
+}
+
+
+def insecure_settings(s: Settings) -> list[str]:
+    """Names of settings that still hold a published default or are too weak for production."""
+    problems = []
+    for name in ("admin_api_key", "internal_api_key", "secret_key", "telegram_webhook_secret"):
+        value = getattr(s, name).get_secret_value()
+        if value in _INSECURE_VALUES or len(value) < 16:
+            problems.append(name.upper())
+    if not s.portal_password.get_secret_value():
+        problems.append("PORTAL_PASSWORD (kosong: /portal dan /dashboard tanpa login)")
+    return problems
 
 
 class ContributionRules:

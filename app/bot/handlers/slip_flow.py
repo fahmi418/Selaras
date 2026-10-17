@@ -171,22 +171,25 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
             if extraction.employer_name and extraction.employer_name.value:
                 extracted_name = extraction.employer_name.value.strip()
+                escaped = extracted_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 comp_match = await session.execute(
-                    select(Company).where(Company.name.ilike(f"%{extracted_name}%")).limit(1)
+                    select(Company)
+                    .where(Company.name.ilike(f"%{escaped}%", escape="\\"))
+                    .limit(2)
                 )
-                comp = comp_match.scalar_one_or_none()
-                if comp:
-                    company_id = comp.company_id
-                    company_name = comp.name
+                matches = comp_match.scalars().all()
+                # Only auto-select on an unambiguous match; never guess a company.
+                if len(matches) == 1:
+                    company_id = matches[0].company_id
+                    company_name = matches[0].name
 
-            if not company_id:
-                fallback_comp = (await session.execute(select(Company).limit(1))).scalar_one_or_none()
-                if fallback_comp:
-                    company_id = fallback_comp.company_id
-                    company_name = fallback_comp.name
-                else:
-                    company_id = "UNKNOWN"
-                    company_name = "Perusahaan Anda"
+            if not company_id or company_id == "UNKNOWN":
+                await update.message.reply_text(
+                    "Saya belum bisa memastikan perusahaan pada slip ini.\n"
+                    "Ketik /lapor untuk memilih perusahaan Anda dari daftar, "
+                    "lalu kirim ulang foto slipnya."
+                )
+                return
 
         # Get BPJS synthetic record (for demo: use company_id to fetch from DB)
         bpjs_record = await _get_bpjs_record(session, company_id, worker_hash)
@@ -265,8 +268,16 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     async with AsyncSessionLocal() as session:
         check = await session.get(SlipCheck, check_id)
-        if not check:
+        if not check or check.worker_hash != worker_hash:
             await query.edit_message_text("Laporan tidak ditemukan.")
+            return
+
+        # One report per slip check: repeated taps must not inflate the independent-report count
+        already = await session.execute(
+            select(WorkerReport.report_id).where(WorkerReport.check_id == check_id).limit(1)
+        )
+        if already.first():
+            await query.edit_message_text("Laporan untuk slip ini sudah tercatat. Terima kasih.")
             return
 
         # Save anonymous report — no worker_hash in worker_report table
@@ -298,15 +309,23 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
         comp_res = await session.execute(select(Company).where(Company.company_id == check.company_id))
         comp = comp_res.scalar_one_or_none()
 
-        slip_wage_val = check.implied_wage_base or 5600000
-        actual_ded_val = check.actual_deduction or 38000
-        reported_wage_val = actual_ded_val * 100
+        worker_rate = get_rules().contribution.worker_rate
+        evidence_parts = ["Pekerja melaporkan slip gaji dengan indikasi selisih iuran."]
+        if check.actual_deduction is not None and check.expected_deduction:
+            slip_wage = round(check.expected_deduction / worker_rate)
+            evidence_parts.append(
+                f"Potongan BPJS di slip Rp{check.actual_deduction:,} dari seharusnya "
+                f"Rp{check.expected_deduction:,} (dasar upah pada slip Rp{slip_wage:,})."
+            )
+        elif check.actual_deduction is None:
+            evidence_parts.append("Potongan BPJS Kesehatan tidak ditemukan pada slip.")
+        evidence_text = " ".join(evidence_parts).replace(",", ".")
 
         report_signal = {
             "code": "WORKER_REPORT_SIGNAL",
             "title": f"Laporan Slip Pekerja Terverifikasi ({category})",
             "detail": f"Pekerja melaporkan slip gaji dengan indikasi selisih iuran ({category}).",
-            "evidence": f"Slip gaji terbaca take-home pay Rp{slip_wage_val:,} dengan potongan BPJS 1% hanya Rp{actual_ded_val:,} (indikasi upah terdaftar Rp{reported_wage_val:,} vs upah riil Rp{slip_wage_val:,}).".replace(",", "."),
+            "evidence": evidence_text,
             "source": "Laporan Mandiri Slip Pekerja",
             "weight": 0.9,
         }
@@ -334,9 +353,9 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
                 due_date=date.today() + timedelta(days=2),
                 reasons_json=json.dumps([report_signal]),
                 checklist_json=json.dumps([
-                    "Cocokkan potongan 1% pada slip pelapor dengan tagihan BPJS",
-                    "Bandingkan take-home pay dan upah pokok terlapor",
-                    "Konfirmasi jumlah pekerja sebenarnya di lokasi entitas"
+                    {"item": "Cocokkan potongan 1% pada slip pelapor dengan tagihan BPJS", "required": True},
+                    {"item": "Bandingkan take-home pay dan upah pokok terlapor", "required": True},
+                    {"item": "Konfirmasi jumlah pekerja sebenarnya di lokasi entitas", "required": True},
                 ]),
                 access_token_hash=t_hash,
                 token_expires=datetime.utcnow() + timedelta(hours=24),

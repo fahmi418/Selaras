@@ -836,3 +836,80 @@ textarea.form-control {
   margin: 0 auto;
   padding: var(--space-16);
 }
+
+/* ==========================================================================
+   Accessibility & shared helpers
+   ========================================================================== */
+
+:focus-visible {
+  outline: 2px solid var(--color-deep-teal);
+  outline-offset: 2px;
+}
+
+.form-control:focus-visible {
+  outline: none;
+}
+
+.alert-error {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  padding: var(--space-10) var(--space-12);
+  font-size: var(--text-small);
+  margin-bottom: var(--space-12);
+}
+
+.alert-error[hidden] {
+  display: none;
+}
+
+.result-note,
+.table-note {
+  font-size: var(--text-small);
+  color: var(--color-graphite);
+  margin-top: var(--space-12);
+  line-height: 1.5;
+}
+
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-20);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--space-24);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  font-weight: var(--font-semibold);
+  color: var(--color-deep-teal);
+  margin-bottom: var(--space-16);
+}
+
+.login-title {
+  font-size: var(--text-heading-sm);
+  font-weight: var(--font-semibold);
+  margin-bottom: var(--space-6);
+}
+
+.login-help {
+  font-size: var(--text-small);
+  color: var(--color-graphite);
+  margin-bottom: var(--space-16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

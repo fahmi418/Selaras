@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -267,9 +267,9 @@ async def create_company(
         }
     ]
     checklist_list = [
-        "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan",
-        "Konfirmasi potongan 1% pekerja pada slip gaji",
-        "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan"
+        {"item": "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan", "required": True},
+        {"item": "Konfirmasi potongan 1% pekerja pada slip gaji", "required": True},
+        {"item": "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan", "required": True},
     ]
     session.add(CaseFile(
         case_id=f"case-{uuid4().hex[:8]}",
