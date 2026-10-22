@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — {{ company.name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body>
+  <main class="portal-wrap">
+    <header class="portal-header">
+      <div>
+        <h1>{{ company.name }} <span class="badge">{{ company.size_bucket }}</span></h1>
+        <p class="portal-sub">NPP {{ company.npp }} · {{ company.sector }} · <a href="/hrd/logout">Keluar</a></p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Indikasi risiko</h2>
+      {% if risk is none %}
+        <p>Belum ada snapshot indikasi untuk tanggal ini.</p>
+      {% else %}
+        <p class="portal-risk">{{ risk_label }} — skor {{ "%.0f" | format(risk) }} (skala 100)</p>
+      {% endif %}
+      <p class="portal-note">Indikasi awal berbasis data terdaftar dan laporan pekerja — bukan vonis pelanggaran.</p>
+    </section>
+
+    {% if attribution %}
+    <section class="card">
+      <h2>Penyumbang indikasi (transparansi)</h2>
+      <ul>
+        {% for item in attribution %}
+          <li>{{ item.label }} — {{ (item.share * 100) | round(1) }}% kontribusi</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if scenarios %}
+    <section class="card">
+      <h2>Bila Anda memperbaiki…</h2>
+      <ul>
+        {% for scenario in scenarios %}
+          <li>
+            <strong>{{ scenario.title }}</strong> — {{ scenario.description }}:
+            skor risiko {{ scenario.risk_before }} → <strong>{{ scenario.risk_after }}</strong>
+            {% if scenario.risk_delta > 0 %}
+              <span class="badge">naik</span>
+            {% elif scenario.risk_delta < 0 %}
+              <span class="badge badge-mint">turun</span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <h2>Simulator deklarasi mandiri (what-if)</h2>
+      <p class="portal-note">Hasil dugaan; tidak ada lampiran data yang dimutasi. Verifikasi tetap oleh petugas.</p>
+      {% if no_snapshot %}
+        <p class="alert-error">{{ no_snapshot }}</p>
+      {% elif what_if %}
+        <p>Skor sebelum deklarasi: <strong>{{ what_if.risk_before }}</strong> → sesudah: <strong>{{ what_if.risk_after }}</strong>
+          {% if what_if.risk_delta < 0 %}
+            <span class="badge badge-mint">turun {{ "%.1f" | format(-what_if.risk_delta) }}</span>
+          {% endif %}
+        </p>
+        {% if what_if.applied %}
+          <ul>
+            {% for item in what_if.applied %}
+              <li>{{ item }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endif %}
+      <form method="post" action="/hrd/what-if">
+        <div class="form-group">
+          <label class="form-label" for="workers">Saya mendaftarkan pekerja baru (orang)</label>
+          <input type="number" id="workers" name="declared_new_workers" class="form-control" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="declare_benchmark_wage" value="true">
+            Saya melaporkan seluruh upah pada tingkat riil
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" name="declare_remit_fixed" value="true">
+            Seluruh tunggakan iuran telah saya bayarkan
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Lihat dugaan dampak</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

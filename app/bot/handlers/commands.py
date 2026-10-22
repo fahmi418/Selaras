@@ -1,4 +1,4 @@
-"""
+﻿"""
 Bot command handlers: /start, /status, /hapus, /privasi, /bantuan.
 """
 
@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime
 from uuid import uuid4
 
 from telegram import Update
@@ -17,24 +16,25 @@ from app.bot.keyboards import consent_keyboard
 from app.config import get_settings
 from app.db.models import SlipCheck, WorkerConsent, WorkerReport
 from app.db.session import AsyncSessionLocal
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 _CONSENT_VERSION = "1.0"
 _PRIVACY_TEXT = """<b>Kebijakan Privasi Selaras</b>
 
-• Foto slip dihapus segera setelah dibaca. Kami tidak menyimpan gambar.
-• Data yang disimpan: angka yang terekstrak, hasil verifikasi — tanpa nama atau NIK Anda.
-• Laporan ke BPJS bersifat anonim. Perusahaan Anda tidak akan tahu siapa yang melapor.
-• Anda bisa menghapus seluruh data Anda kapan saja dengan perintah /hapus.
-• Mode demo: semua data adalah sintetis (contoh). Jangan kirim slip asli Anda.
+â€¢ Foto slip dihapus segera setelah dibaca. Kami tidak menyimpan gambar.
+â€¢ Data yang disimpan: angka yang terekstrak, hasil verifikasi â€” tanpa nama atau NIK Anda.
+â€¢ Laporan ke BPJS bersifat anonim. Perusahaan Anda tidak akan tahu siapa yang melapor.
+â€¢ Anda bisa menghapus seluruh data Anda kapan saja dengan perintah /hapus.
+â€¢ Mode demo: semua data adalah sintetis (contoh). Jangan kirim slip asli Anda.
 
 Dengan menekan [Setuju & Lanjut] Anda menyetujui ketentuan ini (versi {version}).
 """
 
 _ONBOARDING_TEXT = """Halo! Saya Selaras.
 
-Kirim foto slip gaji Anda, saya cek apakah potongan BPJS Kesehatan Anda wajar dan tercatat. Hanya ±30 detik.
+Kirim foto slip gaji Anda, saya cek apakah potongan BPJS Kesehatan Anda wajar dan tercatat. Hanya Â±30 detik.
 
 Keamanan: Foto slip dihapus permanen setelah dibaca. Laporan bersifat anonim dan identitas Anda terlindungi.
 
@@ -60,11 +60,11 @@ async def cmd_bantuan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     await update.message.reply_text(
         "Perintah yang tersedia:\n"
-        "/start — mulai / onboarding\n"
-        "/cek — kirim slip gaji untuk dicek\n"
-        "/status — riwayat cek Anda\n"
-        "/privasi — baca kebijakan privasi\n"
-        "/hapus — hapus semua data Anda"
+        "/start â€” mulai / onboarding\n"
+        "/cek â€” kirim slip gaji untuk dicek\n"
+        "/status â€” riwayat cek Anda\n"
+        "/privasi â€” baca kebijakan privasi\n"
+        "/hapus â€” hapus semua data Anda"
     )
 
 
@@ -101,7 +101,7 @@ async def cmd_hapus(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Revoke consent
         consent = await session.get(WorkerConsent, worker_hash)
         if consent:
-            consent.revoked_at = datetime.utcnow()
+            consent.revoked_at = utcnow()
 
         # Audit trail: record deletion without referencing the hash
         await write_audit(
@@ -146,9 +146,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     lines = ["<b>Riwayat cek Anda (5 terakhir):</b>"]
     for period, verdict_codes_json, created_at in rows:
         codes = json.loads(verdict_codes_json or "[]")
-        code_str = ", ".join(codes) if codes else "–"
-        date_str = created_at.strftime("%d %b %Y") if created_at else "–"
-        lines.append(f"• {period} ({date_str}): {code_str}")
+        code_str = ", ".join(codes) if codes else "â€“"
+        date_str = created_at.strftime("%d %b %Y") if created_at else "â€“"
+        lines.append(f"â€¢ {period} ({date_str}): {code_str}")
 
     await update.message.reply_html("\n".join(lines))
 
@@ -172,12 +172,12 @@ async def handle_consent_callback(update: Update, context: ContextTypes.DEFAULT_
             if existing:
                 existing.revoked_at = None
                 existing.consent_version = _CONSENT_VERSION
-                existing.consented_at = datetime.utcnow()
+                existing.consented_at = utcnow()
             else:
                 session.add(WorkerConsent(
                     worker_hash=worker_hash,
                     consent_version=_CONSENT_VERSION,
-                    consented_at=datetime.utcnow(),
+                    consented_at=utcnow(),
                 ))
             await session.commit()
 

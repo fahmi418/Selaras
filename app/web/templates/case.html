@@ -250,6 +250,48 @@
       {% endif %}
     </section>
 
+    <!-- 5b. Keluhan Suara PANDAWA (Voice Notes Pekerja — Fase 3 Pilar 2) -->
+    {% if voice_reports %}
+    <section class="card">
+      <div class="card-title-row">
+        <span class="card-title">
+          <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg></span>
+          Keluhan Suara PANDAWA
+        </span>
+        <span class="badge badge-teal">REDAKSI PII OTOMATIS</span>
+      </div>
+
+      <p style="font-size: var(--text-small); color: var(--color-graphite); margin-bottom: var(--space-12);">
+        Catatan suara pekerja lewat bot (transkrip tanpa identitas — angka panjang diganti placeholder). Status keterkaitan dengan vonis slip terbaru ditandai otomatis.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: var(--space-10);">
+        {% for v in voice_reports %}
+          <div style="padding: var(--space-12); background-color: var(--color-bone); border-radius: var(--radius-md); font-size: var(--text-small);">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); margin-bottom: var(--space-6);">
+              <span class="badge {% if v.category == 'W4' %}badge-red{% elif v.category == 'W3' %}badge-orange{% elif v.category == 'W1' %}badge-orange{% else %}badge-neutral{% endif %}">
+                {{ v.category }} &middot; {{ v.label }}
+              </span>
+              <span style="font-size: 11px; color: var(--color-slate);">{{ v.date }}</span>
+            </div>
+            <div style="color: var(--color-ink); margin-bottom: var(--space-6);">&ldquo;{{ v.note }}&rdquo;</div>
+            {% if v.aligned %}
+              <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-deep-teal); font-weight: var(--font-semibold);">
+                <span class="dot-indicator dot-success"></span>
+                {{ v.status }}
+              </div>
+            {% else %}
+              <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-warning); font-weight: var(--font-semibold);">
+                <span class="dot-indicator dot-warning"></span>
+                {{ v.status }}
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
     <!-- 6. Checklist Kunjungan Lapangan (PRD §14.1 butir 6 & FR-D4) -->
     <section class="card">
       <div class="card-title-row">

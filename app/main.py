@@ -67,12 +67,12 @@ async def lifespan(app: FastAPI):
         domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN") or os.environ.get("RAILWAY_STATIC_URL")
         if domain:
             base_url = f"https://{domain.replace('https://', '').replace('http://', '').strip('/')}"
+        elif settings.public_base_url:
+            base_url = settings.public_base_url.rstrip("/")
         elif settings.app_base_url.startswith("https://"):
             base_url = settings.app_base_url.rstrip("/")
         elif "railway.app" in settings.app_base_url:
             base_url = settings.app_base_url.replace("http://", "https://").rstrip("/")
-        elif settings.demo_mode and "localhost" in settings.app_base_url:
-            base_url = "https://selaras-production.up.railway.app"
         else:
             base_url = settings.app_base_url.rstrip("/")
 
@@ -125,9 +125,11 @@ def create_app() -> FastAPI:
     # Webhook endpoint
     @app.post("/webhook/telegram")
     async def telegram_webhook(request: Request):
+        import hmac
+
         secret = settings.telegram_webhook_secret.get_secret_value()
         header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if header_secret != secret:
+        if not hmac.compare_digest(header_secret.encode(), secret.encode()):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
@@ -141,15 +143,23 @@ def create_app() -> FastAPI:
     from urllib.parse import quote
 
     from app.api.internal import router as api_router
+    from app.web.analytics import router as analytics_router
     from app.web.auth import LoginRequired, router as auth_router
+    from app.web.hrd import HRDLoginRequired, router as hrd_router
     from app.web.routes import router as web_router
 
     @app.exception_handler(LoginRequired)
     async def _login_required(request: Request, exc: LoginRequired):
         return RedirectResponse(f"/login?next={quote(exc.next_path, safe='/')}", status_code=303)
 
+    @app.exception_handler(HRDLoginRequired)
+    async def _hrd_login_required(request: Request, exc: HRDLoginRequired):
+        return RedirectResponse("/hrd", status_code=303)
+
     app.include_router(auth_router)
+    app.include_router(hrd_router)
     app.include_router(web_router)
+    app.include_router(analytics_router)
     app.include_router(api_router)
 
     # Static files

@@ -26,6 +26,7 @@ from app.bot.handlers.slip_flow import (
     handle_report_callback,
     handle_status_callback,
 )
+from app.bot.handlers.voice_flow import handle_voice_note
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,9 @@ async def build_application() -> Application:
 
     # Photo and Image Document messages
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
+
+    # Voice notes (PANDAWA — multimodal complaint intake)
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice_note))
 
     # Text messages (company name/NPP search & general inquiries)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_search))

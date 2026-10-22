@@ -1,14 +1,15 @@
 """
-Iuran gap estimator — PRD §11.4.
+Estimator selisih iuran — PRD §11.4.
 
-Computes estimated monthly iuran loss (low/mid/high range) per modus.
-All formulas are deterministic from PRD rules; no LLM involved.
+Hitung perkiraan kerugian iuran bulanan (low/mid/high) per modus fraud.
+Seluruh tarif dan faktor pembatas dibaca dari rules.yaml — tidak ada konstanta rahasia.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+
+from app.config import RulesConfig, get_rules
 
 
 @dataclass
@@ -20,8 +21,8 @@ class IuranEstimate:
     assumptions: str
 
 
-_TOTAL_RATE = 0.05
-_EMPLOYER_RATE = 0.04
+def _rates(rules: RulesConfig) -> tuple[float, float]:
+    return float(rules.contribution.total_rate), float(rules.contribution.employer_rate)
 
 
 def estimate_modus1(
@@ -30,16 +31,15 @@ def estimate_modus1(
     median_wage: int,
     p25_wage: int,
     p75_wage: int,
+    rules: RulesConfig | None = None,
 ) -> IuranEstimate:
-    """
-    Modus #1 — Pendaftaran Pekerja Sebagian.
-    est_bulanan = 5% × upah_median_sektor × (est_workers − registered_workers)
-    """
+    """Modus #1 — Pendaftaran Pekerja Sebagian: 5% × upah sektor × gap pekerja."""
+    rules = rules or get_rules()
+    total_rate, _ = _rates(rules)
     gap_workers = max(0, est_headcount - registered_headcount)
-    low = round(_TOTAL_RATE * p25_wage * gap_workers)
-    mid = round(_TOTAL_RATE * median_wage * gap_workers)
-    high = round(_TOTAL_RATE * p75_wage * gap_workers)
-
+    low = round(total_rate * p25_wage * gap_workers)
+    mid = round(total_rate * median_wage * gap_workers)
+    high = round(total_rate * p75_wage * gap_workers)
     return IuranEstimate(
         modus=1,
         est_low=low,
@@ -53,30 +53,35 @@ def estimate_modus2(
     actual_wage: int,
     reported_wage: int,
     n_affected_workers: int,
-    p25_wage: Optional[int] = None,
-    p75_wage: Optional[int] = None,
+    rules: RulesConfig | None = None,
+    p25_wage: int | None = None,
+    p75_wage: int | None = None,
 ) -> IuranEstimate:
-    """
-    Modus #2 — Under-reporting Upah.
-    gap_per_pekerja = 5% × max(0, wage_actual − wage_reported)
-    """
+    """Modus #2 — Under-reporting Upah: 5% × selisih upah × pekerja terdampak."""
+    rules = rules or get_rules()
+    est_cfg = rules.estimator
+    total_rate, _ = _rates(rules)
     wage_gap = max(0, actual_wage - reported_wage)
-    base_mid = round(_TOTAL_RATE * wage_gap * n_affected_workers)
+    base_mid = round(total_rate * wage_gap * max(0, n_affected_workers))
 
-    p25 = p25_wage or round(wage_gap * 0.7)
-    p75 = p75_wage or round(wage_gap * 1.3)
-
-    low = round(_TOTAL_RATE * p25 * max(1, round(n_affected_workers * 0.7)))
-    high = round(_TOTAL_RATE * p75 * round(n_affected_workers * 1.3))
-
+    p25 = p25_wage or round(wage_gap * float(est_cfg["wage_gap_low_share"]))
+    p75 = p75_wage or round(wage_gap * float(est_cfg["wage_gap_high_share"]))
+    low = round(
+        total_rate
+        * p25
+        * max(1, round(max(0, n_affected_workers) * float(est_cfg["wage_gap_low_share"])))
+    )
+    high = round(
+        total_rate
+        * p75
+        * round(max(0, n_affected_workers) * float(est_cfg["wage_gap_high_share"]))
+    )
     return IuranEstimate(
         modus=2,
         est_low=low,
         est_mid=base_mid,
         est_high=high,
-        assumptions=(
-            f"Selisih upah: Rp{wage_gap:,}; pekerja terdampak estimasi: {n_affected_workers}"
-        ),
+        assumptions=f"Selisih upah: Rp{wage_gap:,}; pekerja terdampak estimasi: {n_affected_workers}",
     )
 
 
@@ -84,16 +89,16 @@ def estimate_modus3(
     wage_base: int,
     n_workers: int,
     months_unpaid: int,
+    rules: RulesConfig | None = None,
 ) -> IuranEstimate:
-    """
-    Modus #3 — Penggelapan Iuran.
-    est = 5% × upah_dasar × n_pekerja × bulan_tak_setor
-    """
-    monthly = round(_TOTAL_RATE * wage_base * n_workers)
-    mid = monthly * months_unpaid
-    low = round(mid * 0.7)
-    high = round(mid * 1.4)
-
+    """Modus #3 — Penggelapan Iuran: 5% × upah dasar × pekerja × bulan tak setor."""
+    rules = rules or get_rules()
+    est_cfg = rules.estimator
+    total_rate, _ = _rates(rules)
+    monthly = round(total_rate * max(0, wage_base) * max(0, n_workers))
+    mid = monthly * max(0, months_unpaid)
+    low = round(mid * float(est_cfg["unpaid_low_factor"]))
+    high = round(mid * float(est_cfg["unpaid_high_factor"]))
     return IuranEstimate(
         modus=3,
         est_low=low,
@@ -106,15 +111,15 @@ def estimate_modus3(
 def estimate_modus4(
     wage_base: int,
     n_misclassified_workers: int,
+    rules: RulesConfig | None = None,
 ) -> IuranEstimate:
-    """
-    Modus #4 — Misklasifikasi Status Kerja.
-    Hanya porsi pemberi kerja 4% yang terhindar.
-    """
-    mid = round(_EMPLOYER_RATE * wage_base * n_misclassified_workers)
-    low = round(mid * 0.6)
-    high = round(mid * 1.5)
-
+    """Modus #4 — Misklasifikasi Status Kerja: hanya porsi pemberi kerja 4% yang terhindar."""
+    rules = rules or get_rules()
+    est_cfg = rules.estimator
+    _, employer_rate = _rates(rules)
+    mid = round(employer_rate * max(0, wage_base) * max(0, n_misclassified_workers))
+    low = round(mid * float(est_cfg["misclassification_low_factor"]))
+    high = round(mid * float(est_cfg["misclassification_high_factor"]))
     return IuranEstimate(
         modus=4,
         est_low=low,
@@ -128,15 +133,15 @@ def estimate_modus5(
     wage_base: int,
     n_late_workers: int,
     months_delay: float,
+    rules: RulesConfig | None = None,
 ) -> IuranEstimate:
-    """
-    Modus #5 — Manipulasi Data Mutasi.
-    est = 5% × upah × n_pekerja_terlambat × bulan_keterlambatan
-    """
-    mid = round(_TOTAL_RATE * wage_base * n_late_workers * months_delay)
-    low = round(mid * 0.6)
-    high = round(mid * 1.5)
-
+    """Modus #5 — Manipulasi Data Mutasi: 5% × upah × pekerja terlambat × bulan keterlambatan."""
+    rules = rules or get_rules()
+    est_cfg = rules.estimator
+    total_rate, _ = _rates(rules)
+    mid = round(total_rate * max(0, wage_base) * max(0, n_late_workers) * max(0.0, months_delay))
+    low = round(mid * float(est_cfg["mutation_low_factor"]))
+    high = round(mid * float(est_cfg["mutation_high_factor"]))
     return IuranEstimate(
         modus=5,
         est_low=low,
@@ -147,7 +152,8 @@ def estimate_modus5(
 
 
 def format_estimate_idr(estimate: IuranEstimate) -> str:
-    """Format estimate range as human-readable IDR string for display."""
+    """Format rentang estimasi jadi kalimat IDR siap tampil."""
+
     def _fmt(n: int) -> str:
         if n >= 1_000_000:
             return f"Rp{n / 1_000_000:.1f} jt"

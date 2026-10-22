@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — SyntaxFraud Sandbox</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+
+  <style>
+    .pattern-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: var(--space-16);
+      margin-top: var(--space-16);
+    }
+    .pattern-card {
+      background-color: var(--color-paper);
+      border: 1px solid var(--color-mist);
+      border-radius: var(--radius-lg);
+      padding: var(--space-20);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-10);
+    }
+    .pattern-card.critical { border-top: 3px solid var(--color-danger); }
+    .pattern-card.warning { border-top: 3px solid var(--color-warning); }
+    .pattern-card.ok { border-top: 3px solid var(--color-mint-pulse); }
+    .pattern-stat {
+      display: flex;
+      justify-content: space-between;
+      font-size: var(--text-small);
+      padding: var(--space-8) 0;
+      border-bottom: 1px dashed var(--color-mist);
+    }
+    .pattern-stat:last-child { border-bottom: none; }
+    .pattern-stat .val { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--color-deep-teal); }
+  </style>
+</head>
+<body>
+
+  <header class="app-navbar">
+    <div class="nav-container">
+      <a href="/portal" class="nav-brand">
+        <span aria-hidden="true" class="icon icon-md" style="color: var(--color-mint-pulse);">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        </span>
+        SELARAS
+        <span class="brand-badge">ANALITIK</span>
+      </a>
+
+      <nav aria-label="Navigasi utama">
+        <ul class="nav-links">
+          <li><a href="/portal" class="nav-link">Antrean Kunjungan</a></li>
+          <li><a href="/forecast" class="nav-link">Proyeksi Beban</a></li>
+          <li><a href="/crossdoc" class="nav-link">Nyandingan Dokumen</a></li>
+          <li><a href="/sandbox" class="nav-link active">Sandbox Pola Fraud</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page-container">
+
+    <section class="stat-block" style="padding: var(--space-32) var(--space-24); margin-bottom: var(--space-8);">
+      <div class="stat-block-label">
+        <span>SYNTAXFRAUD SANDBOX — EVALUASI RULE ENGINE TANPA DATA PRODUKSI</span>        <span class="badge badge-mint" style="background-color: rgba(46, 206, 160, 0.2); color: var(--color-mint-pulse); border-color: rgba(46, 206, 160, 0.4);">
+          {{ patterns | length }} POLA &middot; {{ dataset_size }} VEKTOR PER POLA
+        </span>
+      </div>
+      <div class="stat-desc" style="margin-top: var(--space-8);">
+        Generator vektor fitur sintetis berseed deterministik; latih/evaluasi rule engine dapat dibandingkan dengan rencana data produksi.
+        Angka pada kartu ialah rata-rata fitur stres per pola (tanpa mewakili badan usaha nyata).
+      </div>
+    </section>
+
+    <div class="pattern-grid">
+      {% for p in patterns %}
+      <div class="pattern-card {% if p.remit_ratio is not none and p.remit_ratio < 0.8 %}critical{% elif p.headcount_gap and p.headcount_gap > 0 %}warning{% else %}ok{% endif %}">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: var(--text-subheading); font-weight: var(--font-semibold); color: var(--color-ink);">{{ p.title }}</h3>
+          {% if p.remit_ratio is not none and p.remit_ratio < 0.8 %}
+          <span class="badge badge-red">Polanya Kritis</span>
+          {% elif p.headcount_gap and p.headcount_gap > 0 %}
+          <span class="badge badge-orange">Perlu Waspada</span>
+          {% else %}
+          <span class="badge badge-mint">Baseline Patuh</span>
+          {% endif %}
+        </div>
+        <div style="font-size: var(--text-caption); color: var(--color-slate); text-transform: uppercase; letter-spacing: var(--tracking-caption);">
+          {{ p.pattern }}
+        </div>
+
+        <div>
+          <div class="pattern-stat">
+            <span>Rasio setoran (remit_ratio)</span>
+            <span class="val">{{ p.remit_ratio }}</span>
+          </div>
+          <div class="pattern-stat">
+            <span>Rasio under-reporting</span>
+            <span class="val">{{ p.under_reporting_ratio }}</span>
+          </div>
+          <div class="pattern-stat">
+            <span>Selisih headcount</span>
+            <span class="val">{{ p.headcount_gap }}</span>
+          </div>
+          <div class="pattern-stat">
+            <span>Churn pekerja</span>
+            <span class="val">{{ p.churn_rate }}</span>
+          </div>
+          <div class="pattern-stat">
+            <span>Jumlah vektor</span>
+            <span class="val">{{ p.rows }}</span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="disclaimer-banner" style="margin-top: var(--space-16);">
+      <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span>
+      <span>Semua angka berasal dari generator sintetis berseed rules.yaml untuk menguji rule engine (score threshold C1-C6) &mdash; tidak berhubungan dengan pelaporan iuran nyata. Konfigurasi pola pada <code>config/rules.yaml</code> bagian <code>sandbox</code>.</span>
+    </div>
+
+  </main>
+</body>
+</html>

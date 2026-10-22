@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-import secrets
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from hashlib import sha256
 from typing import Optional
 from uuid import uuid4
@@ -24,6 +23,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import write_audit
+from app.cases.service import baseline_priority, issue_access_token, scale_priority, upsert_active_case
+from app.config import get_rules
 from app.db.models import (
     CaseFile,
     Company,
@@ -37,12 +38,20 @@ from app.db.models import (
     WorkerReport,
 )
 from app.db.session import get_db
+from app.utils import utcnow
 from app.web.auth import auth_enabled, require_login
 from app.web.triangulation import build_triangulation
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
 logger = logging.getLogger(__name__)
+
+_VOICE_CATEGORY_LABELS = {
+    "W1": "Potongan Lebih Besar",
+    "W3": "Upah Dilaporkan Rendah",
+    "W4": "Iuran Tidak Disetor",
+    "OTHER": "Keluhan Lain",
+}
 
 
 def _format_idr(val: int | float | None) -> str:
@@ -84,7 +93,7 @@ async def _get_case_by_token(token: str, session: AsyncSession) -> CaseFile:
                 return any_case
         raise HTTPException(status_code=403, detail="Token tidak valid atau telah digunakan. Silakan buka kembali dari Portal Petugas (/portal).")
 
-    if case.token_expires and case.token_expires < datetime.utcnow():
+    if case.token_expires and case.token_expires < utcnow():
         from app.config import get_settings
         if not get_settings().demo_mode:
             raise HTTPException(status_code=410, detail="Token telah kedaluwarsa (berlaku 24 jam).")
@@ -101,13 +110,9 @@ async def case_page(
     case = await _get_case_by_token(token, session)
 
     # In demo mode, ensure active token is always available for write actions
-    import secrets
-    from datetime import datetime, timedelta
     active_token = token
-    if not case.access_token_hash or (case.token_expires and case.token_expires < datetime.utcnow()):
-        active_token = secrets.token_urlsafe(16)
-        case.access_token_hash = sha256(active_token.encode()).hexdigest()
-        case.token_expires = datetime.utcnow() + timedelta(hours=24)
+    if not case.access_token_hash or (case.token_expires and case.token_expires < utcnow()):
+        active_token = await issue_access_token(case)
         await session.commit()
 
     company_result = await session.execute(
@@ -134,7 +139,6 @@ async def case_page(
     checklist = _normalize_checklist(json.loads(case.checklist_json) if case.checklist_json else [])
 
     # Risk level styling
-    from app.config import get_rules
     rules = get_rules()
     labels = rules.risk_labels
     risk_val = score.risk if score else 0
@@ -160,13 +164,16 @@ async def case_page(
 
     # 1-sentence layman summary (PRD §14.1 butir 2)
     signals = json.loads(score.signals_json) if score and score.signals_json else {}
-    if signals.get("C1_under_reporting", 0) >= 0.4:
+    display_thresholds = get_rules().thresholds["signal_display"]
+    if not signals:
+        summary_sentence = "Belum ada skor risiko yang tersedia. Jalankan pipeline penilaian terlebih dahulu."
+    elif signals.get("C1_under_reporting", 0) >= display_thresholds["under_reporting"]:
         summary_sentence = "Indikasi upah yang dilaporkan ke BPJS lebih rendah dari upah riil pada slip gaji pekerja, sehingga potongan 1% dan setoran 4% ikut lebih kecil."
-    elif signals.get("C2_headcount_gap", 0) >= 0.4:
+    elif signals.get("C2_headcount_gap", 0) >= display_thresholds["headcount_gap"]:
         summary_sentence = "Indikasi pendaftaran pekerja sebagian; estimasi pekerja fisik aktif di lapangan melampaui jumlah tenaga kerja terdaftar pada sistem BPJS."
-    elif signals.get("C3_remit_inconsistent", 0) >= 0.3:
+    elif signals.get("C3_remit_inconsistent", 0) >= display_thresholds["remit_inconsistent"]:
         summary_sentence = "Indikasi penggelapan iuran; gaji pekerja terpotong pada slip namun bukti setoran kas badan usaha tercatat menunggak."
-    elif signals.get("C6_worker_reports", 0) >= 0.5:
+    elif signals.get("C6_worker_reports", 0) >= display_thresholds["worker_reports"]:
         summary_sentence = "Terverifikasi sejumlah laporan mandiri independen dari pekerja aktif terkait pemotongan iuran yang tidak sesuai regulasi."
     else:
         summary_sentence = "Indikasi ketidakselarasan iuran berdasarkan verifikasi silang triangulasi data kepesertaan dan setoran."
@@ -206,6 +213,34 @@ async def case_page(
         rules=rules,
     )
     tri["slip_period"] = latest_slip.period if latest_slip else None
+
+    # Voice PANDAWA — latest complaints recorded via bot voice notes (note = redacted transcript)
+    voice_res = await session.execute(
+        select(WorkerReport)
+        .where(WorkerReport.company_id == company.company_id)
+        .where(WorkerReport.note.is_not(None))
+        .order_by(WorkerReport.created_at.desc())
+        .limit(3)
+    )
+    voice_rows = voice_res.scalars().all()
+    verdict_codes = (
+        json.loads(latest_slip.verdict_codes) if (latest_slip and latest_slip.verdict_codes) else []
+    )
+    from app.voice.service import reconcile_with_slip
+
+    voice_reports = []
+    for vr in voice_rows:
+        notes = reconcile_with_slip(vr.category, verdict_codes, rules=rules)
+        voice_reports.append(
+            {
+                "category": vr.category,
+                "label": _VOICE_CATEGORY_LABELS.get(vr.category, "Keluhan Lain"),
+                "note": vr.note,
+                "date": vr.created_at.strftime("%d %b %Y") if vr.created_at else "-",
+                "status": notes[0] if notes else "Keluhan tercatat tanpa vonis slip tersedia.",
+                "aligned": any("selaras" in note.lower() for note in notes),
+            }
+        )
 
     # Format reasons so source and evidence are always clearly displayed
     formatted_reasons = []
@@ -259,6 +294,7 @@ async def case_page(
             "reasons": formatted_reasons,
             "checklist": checklist,
             "tri": tri,
+            "voice_reports": voice_reports,
             "history": history,
             "token": active_token,
         },
@@ -388,41 +424,38 @@ async def officer_portal(
     )
     unassigned_comps = unassigned_comps_res.scalars().all()
 
-    for u_comp in unassigned_comps:
-        t_plain = secrets.token_urlsafe(16)
-        t_hash = sha256(t_plain.encode()).hexdigest()
-        c_id = f"case-{uuid4().hex[:8]}"
-        d_val = date.today() + timedelta(days=2)
-        
-        rs_res = await session.execute(
-            select(RiskScore).where(RiskScore.company_id == u_comp.company_id).order_by(RiskScore.as_of.desc()).limit(1)
-        )
-        rs_obj = rs_res.scalar_one_or_none()
-        r_val = rs_obj.risk if rs_obj else 60.0
-
-        session.add(CaseFile(
-            case_id=c_id,
-            company_id=u_comp.company_id,
-            status="assigned",
-            priority=float(r_val * 100),
-            assigned_officer=current_officer.officer_id,
-            due_date=d_val,
-            reasons_json=json.dumps([{
-                "code": "AUTO_SYNC_REGISTRATION",
-                "title": f"Triangulasi Integritas Iuran — {u_comp.name}",
-                "detail": f"Entitas aktif di wilayah {u_comp.region_id} ({u_comp.registered_headcount} pekerja). Siap diverifikasi silang.",
-                "weight": 0.6,
-            }]),
-            checklist_json=json.dumps([
-                {"item": "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan", "required": True},
-                {"item": "Konfirmasi potongan 1% pekerja pada slip gaji", "required": True},
-                {"item": "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan", "required": True},
-            ]),
-            access_token_hash=t_hash,
-            token_expires=datetime.utcnow() + timedelta(hours=24),
-        ))
-
     if unassigned_comps:
+        rules = get_rules()
+        for u_comp in unassigned_comps:
+            score_res = await session.execute(
+                select(RiskScore)
+                .where(RiskScore.company_id == u_comp.company_id)
+                .order_by(RiskScore.as_of.desc())
+                .limit(1)
+            )
+            score_obj = score_res.scalar_one_or_none()
+            priority = scale_priority(score_obj.risk, rules) if score_obj else baseline_priority(rules)
+            await upsert_active_case(
+                session,
+                company_id=u_comp.company_id,
+                reasons=[
+                    {
+                        "code": "AUTO_SYNC_REGISTRATION",
+                        "title": f"Triangulasi Integritas Iuran — {u_comp.name}",
+                        "detail": f"Entitas aktif di wilayah {u_comp.region_id} ({u_comp.registered_headcount} pekerja). Siap diverifikasi silang.",
+                        "evidence": f"NPP {u_comp.npp} aktif ({u_comp.registered_headcount} pekerja terdaftar).",
+                        "source": "Sinkronisasi Portal Petugas",
+                        "weight": 0.6,
+                    }
+                ],
+                checklist=[
+                    {"item": "Periksa daftar gaji (payroll) asli dan bandingkan dengan data kepesertaan", "required": True},
+                    {"item": "Konfirmasi potongan 1% pekerja pada slip gaji", "required": True},
+                    {"item": "Verifikasi keabsahan jumlah tenaga kerja aktif di lapangan", "required": True},
+                ],
+                priority=priority,
+                officer_id=current_officer.officer_id,
+            )
         await session.commit()
 
     # Query assigned cases for this officer
@@ -454,18 +487,14 @@ async def officer_portal(
     cases_without_estimate = 0
     high_priority_count = 0
 
-    from app.config import get_rules
     rules = get_rules()
     risk_labels = rules.risk_labels
     visit_hours = float(rules.planner["default_visit_hours"])
     open_cases = 0
 
     for case, comp, reg, score in rows:
-        # Ensure an active token exists for each case so the officer can click it
-        token_plain = secrets.token_urlsafe(16)
-        token_hash = sha256(token_plain.encode()).hexdigest()
-        case.access_token_hash = token_hash
-        case.token_expires = datetime.utcnow() + timedelta(hours=24)
+        # Issue access token for each case so the officer can click it
+        token_plain = await issue_access_token(case)
 
         # No score yet means no estimate and no risk label; never substitute a made-up figure.
         est_mid = score.est_mid if score and score.est_mid else None
@@ -543,7 +572,7 @@ class VerifyEvaluateRequest(BaseModel):
     allowance: int = Field(default=0, ge=0, le=1_000_000_000)
     deduction: int = Field(ge=0, le=1_000_000_000)
     recorded_wage: Optional[int] = Field(default=None, ge=0, le=1_000_000_000)
-    umk: int = Field(default=3_000_000, ge=0, le=1_000_000_000)
+    umk: int = Field(default_factory=lambda: get_rules().default_umk, ge=0, le=1_000_000_000)
     is_registered: bool = True
     is_remitted: Optional[bool] = None
 

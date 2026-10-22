@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from app.config import RulesConfig, get_rules
-from app.rules.dictionary import ComponentType, classify_component, is_jkn_deduction
+from app.rules.dictionary import ComponentType, classify_component
 from app.slip.schema import PayslipExtraction
 
 
@@ -75,10 +75,10 @@ class VerdictResult:
 # Core computation helpers
 # ---------------------------------------------------------------------------
 
-_CRITICAL_CONFIDENCE = 0.70
 
-
-def _compute_wage_base(extraction: PayslipExtraction, umk: int, rules: RulesConfig) -> tuple[int, list[str]]:
+def _compute_wage_base(
+    extraction: PayslipExtraction, umk: int, rules: RulesConfig
+) -> tuple[int, list[str]]:
     """
     Sum gaji_pokok + tunjangan_tetap from extraction, clamped to [UMK, wage_cap].
     Returns (clamped_base, list_of_ambiguous_labels).
@@ -145,7 +145,7 @@ def verdict_slip(
         return result
 
     min_conf = extraction.min_confidence_critical()
-    if min_conf < _CRITICAL_CONFIDENCE:
+    if min_conf < float(rules.extraction["critical_confidence"]):
         result.codes = [Verdict.NEEDS_REVIEW]
         result.explanation = f"Keterbacaan gambar rendah (confidence {min_conf:.0%}). Harap kirim ulang foto yang lebih jelas."
         result.confidence = "low"

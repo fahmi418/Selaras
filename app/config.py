@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # App
     app_base_url: str = "http://localhost:8000"
+    public_base_url: str = ""   # PUBLIC_BASE_URL — domain publik HTTPS untuk webhook bila beda
     secret_key: SecretStr = Field(default=SecretStr("selaras-secret-key-32chars-minimum-demo"))
 
     # Auth
@@ -103,30 +104,65 @@ class ToleranceRules:
         return diff <= threshold
 
 
+_REQUIRED_RULE_KEYS = (
+    "rule_version",
+    "contribution",
+    "tolerance",
+    "extraction",
+    "escalation",
+    "scoring",
+    "estimator",
+    "planner",
+    "cases",
+    "thresholds",
+    "features",
+    "company",
+    "rate_limit",
+    "retention",
+    "morning_message",
+    "risk_labels",
+    "briefing",
+    "xai",
+    "crossdoc",
+    "voice",
+    "forecast",
+    "sandbox",
+)
+
+
 class RulesConfig:
     """Loaded once at startup from config/rules.yaml; immutable thereafter."""
 
-    version: str
-    contribution: ContributionRules
-    tolerance: ToleranceRules
-    escalation: dict
-    scoring: dict
-    planner: dict
-    rate_limit: dict
-    retention: dict
-    risk_labels: dict
-
     def __init__(self, path: Path) -> None:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        missing = [key for key in _REQUIRED_RULE_KEYS if key not in raw]
+        if missing:
+            raise RuntimeError(
+                f"config/rules.yaml kehilangan bagian wajib: {', '.join(missing)}. "
+                "Lengkapi file konfigurasi agar sistem dapat berjalan deterministik."
+            )
         self.version = raw["rule_version"]
         self.contribution = ContributionRules(raw["contribution"])
         self.tolerance = ToleranceRules(raw["tolerance"])
+        self.extraction = raw["extraction"]
         self.escalation = raw["escalation"]
         self.scoring = raw["scoring"]
+        self.estimator = raw["estimator"]
         self.planner = raw["planner"]
+        self.cases = raw["cases"]
+        self.thresholds = raw["thresholds"]
+        self.features = raw["features"]
+        self.company = raw["company"]
         self.rate_limit = raw["rate_limit"]
         self.retention = raw["retention"]
+        self.morning_message = raw["morning_message"]
         self.risk_labels = raw["risk_labels"]
+        self.briefing = raw["briefing"]
+        self.xai = raw["xai"]
+        self.crossdoc = raw["crossdoc"]
+        self.voice = raw["voice"]
+        self.forecast = raw["forecast"]
+        self.sandbox = raw["sandbox"]
 
     @property
     def min_independent_reports(self) -> int:
@@ -139,6 +175,14 @@ class RulesConfig:
     @property
     def data_only_risk_threshold(self) -> int:
         return self.escalation["data_only_risk_threshold"]
+
+    @property
+    def size_bucket_caps(self) -> dict[str, int | None]:
+        return {k: (None if v is None else int(v)) for k, v in self.company["size_buckets"].items()}
+
+    @property
+    def default_umk(self) -> int:
+        return int(self.thresholds["default_umk"])
 
 
 _RULES_PATH = Path(__file__).parent.parent / "config" / "rules.yaml"

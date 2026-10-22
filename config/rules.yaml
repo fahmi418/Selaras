@@ -11,6 +11,10 @@ tolerance:
   absolute_idr: 1000         # toleransi absolut Rp 1.000
   relative: 0.02             # toleransi relatif 2% — pakai mana yang lebih besar
 
+extraction:
+  critical_confidence: 0.70  # kepercayaan minimum field kritis ekstraksi VLM
+  net_tolerance_pct: 0.01    # toleransi selisih perhitungan neto (1%)
+
 escalation:
   min_independent_reports: 2  # k: minimum laporan pekerja independen
   require_data_anomaly: true  # eskalasi butuh JUGA anomali data
@@ -20,7 +24,6 @@ scoring:
   weights:
     rule: 0.7
     anomaly: 0.3
-  # Bobot per sinyal C (rule score)
   signal_weights:
     C1_under_reporting: 25
     C2_headcount_gap: 20
@@ -28,14 +31,72 @@ scoring:
     C4_uniform_wage: 10
     C5_churn: 10
     C6_worker_reports: 10
+  isoforest:
+    n_estimators: 100
+    contamination: 0.12
+    random_state: 42
+    min_companies: 10        # di bawah ini skor anomali = 0 semua
+  max_unpaid_months_cap: 6   # saturasi sinyal C5 (bulan)
+  report_share_multiplier: 10   # sinyal C6
+  uniform_wage_multiplier: 2    # sinyal C4
+  uniform_wage_clip: 1.05       # ambang rasio upah dianggap "tepat di UMK"
+  under_reporting_ratio_ceiling: 1.2   # sinyal C1 hanya bila rasio di bawah ini
+  anomaly_data_risk: 30         # risk > ini dianggap anomali data (syarat eskalasi)
+
+estimator:
+  wage_gap_low_share: 0.7     # p25 fallback modus 2
+  wage_gap_high_share: 1.3    # p75 fallback modus 2
+  unpaid_low_factor: 0.7      # modus 3 lower bound
+  unpaid_high_factor: 1.4     # modus 3 upper bound
+  misclassification_low_factor: 0.6   # modus 4
+  misclassification_high_factor: 1.5  # modus 4
+  mutation_low_factor: 0.6    # modus 5
+  mutation_high_factor: 1.5   # modus 5
 
 planner:
-  explore_share: 0.20         # 20% slot "eksplorasi" (skor sedang, acak terbobot)
-  default_visit_hours: 3.0    # jam estimasi per kunjungan
-  urgency_increment_per_day: 0.05  # urgency bertambah per hari kasus menunggu
+  explore_share: 0.20               # 20% slot "eksplorasi" (band skor tengah, acak)
+  default_visit_hours: 3.0          # jam estimasi per kunjungan
+  travel_hours: 1.0                 # estimasi perjalanan per kunjungan
+  min_cost_hours: 0.1               # pembilang nol pada skor prioritas
+  urgency_increment_per_day: 0.05   # urgency bertambah per hari kasus menunggu
+  urgency_max: 2.0                  # batas atas multiplier urgency
+  explore_band: [0.4, 0.8]          # band fraksi ranking kandidat untuk eksplorasi
+  case_due_days: 1                  # tenggat kunjungan kasus hasil planner (hari)
+
+cases:
+  due_days: 2                       # tenggat kasus dibuat sistem otomatis (hari)
+  priority_scale: 100               # risk-poin → prioritas angka
+  report_boost_risk_points: 85      # poin minimal saat ada laporan pekerja
+  baseline_risk_points: 65          # poin default bila belum ada skor risiko
+
+thresholds:
+  default_umk: 3_000_000            # fallback bila region perusahaan tidak ditemukan
+  remit_paid_ratio: 0.95            # dianggap setor bila paid ≥ 95% billed
+  reason_contribution: 0.10         # sinyal masuk reason card bila > ini
+  checklist_signal: 0.20            # sinyal memicu item checklist bila > ini
+  signal_display:
+    under_reporting: 0.40           # ambang kalimat ringkasan C1
+    headcount_gap: 0.40             # ambang kalimat ringkasan C2
+    remit_inconsistent: 0.30        # ambang kalimat ringkasan C3
+    worker_reports: 0.50            # ambang kalimat ringkasan C6
+
+features:
+  billing_lookback_months: 3        # jendela riwayat tagihan
+  reports_lookback_months: 6        # jendela laporan pekerja
+
+company:
+  default_sector: "jasa"
+  default_region_id: "jkt-utara"
+  default_headcount: 50
+  default_average_wage: 5_000_000
+  size_buckets:                     # batas atas est_headcount per kelas
+    micro: 10
+    small: 50
+    medium: 200
 
 rate_limit:
   slip_checks_per_hour: 10   # per worker_hash
+  voice_checks_per_hour: 3   # voice note pekerja (PANDAWA) per worker_hash
 
 retention:
   worker_report_months: 12
@@ -50,4 +111,88 @@ morning_message:
 risk_labels:
   high: 70
   medium: 40
-  # < 40 = low
+
+briefing:
+  transcript_provider: "auto"  # auto | off — sumber Voice-to-BAP
+  interview_goals_max: 3
+  prescriptive_actions:
+    C1_under_reporting: "Minta rincian payroll asli 3 bulan terakhir dan sampel rekening koran perusahaan."
+    C2_headcount_gap: "Cocokkan daftar hadir dan kontrak kerja di lapangan dengan daftar kepesertaan BPJS."
+    C3_remit_inconsistent: "Minta bukti setoran iuran JKN 3 bulan terakhir (kartu bukti setor / rekening koran)."
+    C4_uniform_wage: "Verifikasi struktur gaji riil: lonjakan posisi/grade dan tunjangan tetap yang jarang."
+    C5_churn: "Periksa alasan mutasi pekerja menjelang periode auditan dan keabsahan SK mutasi."
+    C6_worker_reports: "Wawancara pekerja sampel tanpa kehadiran HRD (jaga kerahasiaan identitas)."
+
+xai:
+  # Rasio upah-sumber yang dianggap "tingkat riil" pada simulasi perbaikan kontraktual.
+  true_wage_umk_ratio_assumption: 1.10
+  counterfactual_scenarios:
+    register_all_workers:
+      title: "Daftarkan seluruh pekerja belum terdaftar"
+      description: "Seluruh pekerja lapangan masuk kepesertaan BPJS (selisih headcount nol)."
+      overrides:
+        headcount_gap: 0.0
+    report_true_wages:
+      title: "Laporkan upah pada tingkat riil"
+      description: "Upah tercatat diasumsikan penyuaan dengan UMK regional (indikator industri)."
+      overrides:
+        avg_wage_ratio_to_umk: "@true_wage"
+        pct_wage_at_umk: 0.0
+    fix_remit:
+      title: "Lunasi seluruh iuran tertunggak"
+      description: "Setoran iuran jendela monitor lunak penuh."
+      overrides:
+        remit_ratio: 1.0
+        unpaid_months: 0.0
+    differentiate_wages:
+      title: "Struktur upah didiferensiasi"
+      description: "Upah tidak lagi seragam di titik UMK."
+      overrides:
+        pct_wage_at_umk: 0.0
+    resolve_worker_reports:
+      title: "Selesaikan keluhan pekerja"
+      description: "Tidak ada laporan pekerja aktif pada jendela monitor."
+      overrides:
+        worker_report_share: 0.0
+  what_if:
+    max_new_workers_share: 1.0  # bila perusahaan mengklaim mendaftarkan pekerja baru, batas = 100% dari headcount terdaftar
+
+crossdoc:
+  wage_tolerance_pct: 0.02       # PPh21 vs payroll: selisih upah kotor <= 2%
+  bank_transfer_tolerance_pct: 0.05  # rekening koran vs payroll neto <= 5%
+  critical_discrepancies: 2      # temuan kritis utk eskalasi kasus otomatis
+
+voice:
+  redact_digits: true            # nol-PII: semua angka panjang → placeholder
+  max_transcript_chars: 3000
+  complaint_keywords:
+    W1: ["potongan lebih", "bayar sendiri", "dipotong lebih"]
+    W3: ["upah dasar", "gaji pokok", "dilaporkan lebih rendah"]
+    W4: ["tidak disetor", "belum disetor", "tidak setor", "belum terdaftar"]
+
+forecast:
+  horizon_days: 7                # proyeksi antrean kasus berikutnya
+  moving_average_window: 14      # jendela rerata bergerak harian kasus baru
+  min_history_days: 3            # bila riwayat < ini, proyeksi memakai ambang minimum
+  fallback_daily_cases: 2        # bila pembilang history kosong/0
+  weekday_weights: [1.0, 1.05, 1.0, 1.0, 1.1, 0.6, 0.5]   # Sen..Min (indeks 0=Senin)
+
+sandbox:
+  dataset_size: 50               # bnb vektor fraud sintetis utk melatih IsoForest/rule engine
+  patterns:
+    seasonal_mutation:
+      title: "Manipulasi mutasi musiman"
+      ramp_weeks: 6
+      exit_share: 0.35
+    under_reporting_ramp:
+      title: "Under-reporting bertahap"
+      start_share: 0.95
+      end_share: 0.5
+      months: 6
+    micro_split:
+      title: "Split entitas mikro"
+      threshold_headcount: 10
+      split_entities: 3
+    clean_baseline:
+      title: "Perusahaan patuh (kontrol)"
+      noise_wage: 0.08

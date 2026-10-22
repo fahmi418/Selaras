@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — Nyandingan Dokumen Lintas Sumber</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body>
+
+  <header class="app-navbar">
+    <div class="nav-container">
+      <a href="/portal" class="nav-brand">
+        <span aria-hidden="true" class="icon icon-md" style="color: var(--color-mint-pulse);">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        </span>
+        SELARAS
+        <span class="brand-badge">ANALITIK</span>
+      </a>
+
+      <nav aria-label="Navigasi utama">
+        <ul class="nav-links">
+          <li><a href="/portal" class="nav-link">Antrean Kunjungan</a></li>
+          <li><a href="/forecast" class="nav-link">Proyeksi Beban</a></li>
+          <li><a href="/crossdoc" class="nav-link active">Nyandingan Dokumen</a></li>
+          <li><a href="/sandbox" class="nav-link">Sandbox Pola Fraud</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page-container">
+
+    <!-- Ringkasan Hasil -->
+    {% if result %}
+    <section class="stat-block" style="padding: var(--space-32) var(--space-24); margin-bottom: var(--space-24);">
+      <div class="stat-block-label">
+        <span>HASIL NYANDINGAN — {{ result.company_name }} &middot; PERIODE {{ result.period }}</span>
+        {% if result.escalated %}
+        <span class="badge badge-red">
+          <span class="dot-indicator dot-danger"></span>
+          KASUS DIESKALASI
+        </span>
+        {% else %}
+        <span class="badge badge-mint" style="background-color: rgba(46, 206, 160, 0.2); color: var(--color-mint-pulse); border-color: rgba(46, 206, 160, 0.4);">
+          AMAN / IRDING
+        </span>
+        {% endif %}
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-20); margin-top: var(--space-12);">
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">Temuan Kritis</div>
+          <div class="stat-numeral">{{ result.critical }}</div>
+        </div>
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">Perhatian</div>
+          <div style="font-family: var(--font-inter); font-size: 36px; font-weight: 600; color: var(--color-paper);">{{ result.warning }}</div>
+        </div>
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">Selaras</div>
+          <div style="font-family: var(--font-inter); font-size: 36px; font-weight: 600; color: var(--color-paper);">{{ result.info }}</div>
+        </div>
+      </div>
+
+      {% if result.escalated %}
+      <div class="stat-desc" style="margin-top: var(--space-12);">
+        Temuan kritis mencapai ambang eskalasi; kasus aktif badan usaha ini sudah bertambah di antrean kunjungan petugas.
+      </div>
+      {% endif %}
+    </section>
+
+    <!-- Daftar Temuan -->
+    <section class="card">
+      <div class="card-title-row">
+        <span class="card-title">
+          <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>
+          Rincian Temuan
+        </span>
+      </div>
+
+      {% for f in result.findings %}
+      <div class="reason-card {% if f.severity == 'critical' %}severity-high{% elif f.severity == 'warning' %}severity-med{% endif %}">
+        <div class="reason-header">
+          <span class="reason-title">{{ f.title }}</span>
+          {% if f.severity == 'critical' %}<span class="badge badge-red">Kritis</span>
+          {% elif f.severity == 'warning' %}<span class="badge badge-orange">Perhatian</span>
+          {% elif f.code == 'X0_INCOMPLETE' %}<span class="badge badge-neutral">Data Kurang</span>
+          {% else %}<span class="badge badge-mint">Selaras</span>{% endif %}
+        </div>
+        <div class="reason-meta">
+          <span>{{ f.code }}</span>
+        </div>
+        <div class="reason-evidence" style="margin-top: var(--space-6);">{{ f.evidence }}</div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <!-- Form Input -->
+    <section class="card">
+      <div class="card-title-row">
+        <span class="card-title">
+          <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></span>
+          Input Dokumen Satu Periode
+        </span>
+        <span class="badge badge-teal">DETERMINISTIK ZERO-LLM</span>
+      </div>
+
+      <p class="result-note" style="margin-bottom: var(--space-16);">
+        Masukkan angka kunci hasil ekstraksi VLM dari PPh21, payroll, slip gaji, dan rekening koran untuk satu periode.
+        Mesin nyandingan membandingkan dengan toleransi rules.yaml dan menaikkan kasus aktif bila temuan kritis mencapai ambang.
+      </p>
+
+      <form method="post" action="/crossdoc">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-16);">
+          <div class="form-group">
+            <label class="form-label" for="company_id">Badan Usaha</label>
+            <select class="form-control" id="company_id" name="company_id" required>
+              {% for c in companies %}
+                <option value="{{ c.company_id }}" {% if form and form.company_id == c.company_id %}selected{% endif %}>
+                  {{ c.name }} — NPP {{ c.npp }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="period">Periode (YYYY-MM)</label>
+            <input class="form-control" id="period" name="period" type="month" required
+                   placeholder="2026-09" {% if form %}value="{{ form.period }}"{% endif %}>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-16);">
+          <div class="form-group">
+            <label class="form-label" for="pph21_gross">Upah Kotor Bukti Potong PPh21 (Rp)</label>
+            <input class="form-control" id="pph21_gross" name="pph21_gross" inputmode="numeric"
+                   placeholder="5000000" {% if form %}value="{{ form.pph21_gross }}"{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="bank_amounts">Jumlah Transfer di Rekening Koran (Rp, pisahkan dengan spasi)</label>
+            <input class="form-control" id="bank_amounts" name="bank_amounts" inputmode="numeric"
+                   placeholder="4950000 4980000" {% if form %}value="{{ form.bank_amounts }}"{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="payroll_gross">Payroll: upah kotor per pekerja (Rp, pisahkan spasi)</label>
+            <input class="form-control" id="payroll_gross" name="payroll_gross" inputmode="numeric"
+                   placeholder="5000000 5100000" {% if form %}value="{{ form.payroll_gross }}"{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="payroll_jkn">Payroll: potongan JKN per pekerja (Rp, urut sama dgn baris payroll)</label>
+            <input class="form-control" id="payroll_jkn" name="payroll_jkn" inputmode="numeric"
+                   placeholder="50000 51000" {% if form %}value="{{ form.payroll_jkn }}"{% endif %}>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="slip_jkn">Slip pekerja: potongan JKN (Rp, pisahkan spasi)</label>
+            <input class="form-control" id="slip_jkn" name="slip_jkn" inputmode="numeric"
+                   placeholder="50000" {% if form %}value="{{ form.slip_jkn }}"{% endif %}>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: var(--space-8); margin-top: var(--space-4);">
+          <button type="submit" class="btn btn-primary btn-lg" style="flex: 1; max-width: 360px;">
+            <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"></path></svg></span>
+            Cocokkan Dokumen
+          </button>
+        </div>
+      </form>
+
+      <div class="result-note">
+        Alur data: hasil ekstraksi VLM dokumen &rarr; mesin nyandingan murni rule (tanpa LLM).
+        Toleransi selisih upah PPh21/payroll serta arus keluar bank mengikuti rules.yaml; kasus aktif otomatis
+        diperbarui bila temuan kritis memenuhi ambang eskalasi.
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>

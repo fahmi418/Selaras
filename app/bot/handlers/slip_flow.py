@@ -15,22 +15,24 @@ import logging
 import os
 import tempfile
 import time
-from datetime import datetime
+from datetime import timedelta
 from uuid import uuid4
 
 from telegram import Update
 from telegram.ext import ContextTypes
-from sqlalchemy import select, or_, delete
+from sqlalchemy import select, func
 
 from app.audit import write_audit
 from app.bot.keyboards import clarification_keyboard, verdict_action_keyboard, work_status_keyboard, skip_keyboard
+from app.cases.service import boosted_priority, find_open_case, upsert_active_case
 from app.config import get_rules, get_settings
-from app.db.models import SlipCheck, WorkerConsent, WorkerReport
+from app.db.models import Billing, Company, Enrollment, Officer, Region, SlipCheck, WorkerConsent, WorkerReport
 from app.db.session import AsyncSessionLocal
 from app.rules.engine import BPJSRecord, Verdict, verdict_slip
 from app.slip.gemini_client import GeminiExtractionError, extract_payslip
 from app.slip.preprocessor import preprocess
 from app.slip.validator import validate_extraction
+from app.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +106,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
 
         # Rate limiting: check how many checks in the last hour
-        from sqlalchemy import select, func
-        from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(hours=1)
+        cutoff = utcnow() - timedelta(hours=1)
         count_result = await session.execute(
             select(func.count(SlipCheck.check_id))
             .where(SlipCheck.worker_hash == worker_hash)
@@ -166,9 +166,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         company_name = context.user_data.get("selected_company_name")
 
         if not company_id or company_id == "UNKNOWN":
-            from app.db.models import Company
-            from sqlalchemy import select
-
             if extraction.employer_name and extraction.employer_name.value:
                 extracted_name = extraction.employer_name.value.strip()
                 escaped = extracted_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -213,7 +210,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             return
 
         # Save SlipCheck (no photo, only structured data)
-        period = "2026-09"  # TODO: extract from extraction.period
+        now = utcnow()
+        period = f"{now.year}-{now.month:02d}"
         if extraction.period and extraction.period.month and extraction.period.year:
             period = f"{extraction.period.year}-{extraction.period.month:02d}"
 
@@ -293,20 +291,9 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
         session.add(report)
 
         # Auto-sync/escalate CaseFile for this company
-        from app.db.models import CaseFile, Officer, Company
-        from hashlib import sha256
-        import secrets
-        from datetime import date, datetime, timedelta
-
-        case_res = await session.execute(
-            select(CaseFile).where(
-                CaseFile.company_id == check.company_id,
-                CaseFile.status.in_(["pending", "assigned", "snoozed"])
-            )
+        comp_res = await session.execute(
+            select(Company).where(Company.company_id == check.company_id)
         )
-        existing_case = case_res.scalar_one_or_none()
-        
-        comp_res = await session.execute(select(Company).where(Company.company_id == check.company_id))
         comp = comp_res.scalar_one_or_none()
 
         worker_rate = get_rules().contribution.worker_rate
@@ -330,36 +317,27 @@ async def handle_report_callback(update: Update, context: ContextTypes.DEFAULT_T
             "weight": 0.9,
         }
 
-        if existing_case:
-            existing_case.priority = max(existing_case.priority, 8500.0)
-            cur_reasons = json.loads(existing_case.reasons_json) if existing_case.reasons_json else []
-            cur_reasons.insert(0, report_signal)
-            existing_case.reasons_json = json.dumps(cur_reasons)
-        elif comp:
-            off_res = await session.execute(select(Officer).where(Officer.region_id == comp.region_id).limit(1))
-            off = off_res.scalar_one_or_none()
-            if not off:
-                any_off = await session.execute(select(Officer).limit(1))
-                off = any_off.scalar_one_or_none()
+        if comp:
+            open_case = await find_open_case(session, comp.company_id)
+            officer = (await session.execute(
+                select(Officer).where(Officer.region_id == comp.region_id).limit(1)
+            )).scalar_one_or_none()
+            if officer is None:
+                officer = (await session.execute(select(Officer).limit(1))).scalar_one_or_none()
 
-            t_plain = secrets.token_urlsafe(16)
-            t_hash = sha256(t_plain.encode()).hexdigest()
-            session.add(CaseFile(
-                case_id=f"case-{uuid4().hex[:8]}",
+            await upsert_active_case(
+                session,
                 company_id=comp.company_id,
-                status="assigned",
-                priority=8500.0,
-                assigned_officer=off.officer_id if off else None,
-                due_date=date.today() + timedelta(days=2),
-                reasons_json=json.dumps([report_signal]),
-                checklist_json=json.dumps([
+                reasons=[report_signal],
+                checklist=[
                     {"item": "Cocokkan potongan 1% pada slip pelapor dengan tagihan BPJS", "required": True},
                     {"item": "Bandingkan take-home pay dan upah pokok terlapor", "required": True},
                     {"item": "Konfirmasi jumlah pekerja sebenarnya di lokasi entitas", "required": True},
-                ]),
-                access_token_hash=t_hash,
-                token_expires=datetime.utcnow() + timedelta(hours=24),
-            ))
+                ],
+                priority=boosted_priority(open_case.priority if open_case else None),
+                officer_id=officer.officer_id if officer else None,
+                prepend_reasons=open_case is not None,
+            )
 
         await write_audit(
             session, actor="anonymous", action="REPORT",
@@ -426,11 +404,6 @@ async def handle_status_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 async def _get_bpjs_record(session, company_id: str, worker_hash: str) -> BPJSRecord:
     """Fetch synthetic BPJS enrollment + billing for this worker's company."""
-    from app.db.models import Billing, Enrollment
-    from sqlalchemy import select
-    from datetime import date
-
-    # In synthetic mode, we use the company's average or first enrollment
     enrollment_result = await session.execute(
         select(Enrollment.reported_wage_base, Enrollment.registered_status)
         .where(Enrollment.company_id == company_id)
@@ -438,7 +411,7 @@ async def _get_bpjs_record(session, company_id: str, worker_hash: str) -> BPJSRe
     )
     enrollment = enrollment_result.first()
 
-    period_str = datetime.now().strftime("%Y-%m")
+    period_str = utcnow().strftime("%Y-%m")
     billing_result = await session.execute(
         select(Billing.paid_amount, Billing.billed_amount)
         .where(Billing.company_id == company_id)
@@ -449,7 +422,8 @@ async def _get_bpjs_record(session, company_id: str, worker_hash: str) -> BPJSRe
 
     is_remitted = None
     if billing:
-        is_remitted = billing.paid_amount >= billing.billed_amount * 0.95
+        remit_ratio = float(get_rules().thresholds["remit_paid_ratio"])
+        is_remitted = billing.paid_amount >= billing.billed_amount * remit_ratio
 
     return BPJSRecord(
         recorded_wage_base=enrollment.reported_wage_base if enrollment else None,
@@ -459,10 +433,7 @@ async def _get_bpjs_record(session, company_id: str, worker_hash: str) -> BPJSRe
 
 
 async def _get_umk(session, company_id: str) -> int:
-    """Get UMK for the company's region."""
-    from app.db.models import Company, Region
-    from sqlalchemy import select
-
+    """UMK region perusahaan; fallback ke default_umk bila region tidak ditemukan."""
     result = await session.execute(
         select(Region.umk)
         .join(Company, Company.region_id == Region.region_id)
@@ -470,4 +441,4 @@ async def _get_umk(session, company_id: str) -> int:
         .limit(1)
     )
     row = result.first()
-    return row.umk if row else 3_000_000  # fallback UMK
+    return int(row.umk) if row else get_rules().default_umk

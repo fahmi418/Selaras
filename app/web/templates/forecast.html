@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Selaras — Proyeksi Beban Kerja Antrean</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+
+  <style>
+    .fc-day-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-12);
+      padding: var(--space-10) 0;
+      border-bottom: 1px solid var(--color-mist);
+    }
+    .fc-day-row:last-child { border-bottom: none; }
+    .fc-day-row .day-meta { width: 170px; flex-shrink: 0; }
+    .fc-bar {
+      flex: 1;
+      height: 12px;
+      background: var(--color-bone);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+    }
+    .fc-bar > span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--color-soft-teal) 0%, var(--color-mint-pulse) 100%);
+      border-radius: inherit;
+    }
+    .fc-bar.over > span { background: linear-gradient(90deg, var(--color-warning), var(--color-danger)); }
+    .fc-num { width: 120px; text-align: right; font-family: var(--font-mono); font-size: 13px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <header class="app-navbar">
+    <div class="nav-container">
+      <a href="/portal" class="nav-brand">
+        <span aria-hidden="true" class="icon icon-md" style="color: var(--color-mint-pulse);">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="m9 12 2 2 4-4"></path></svg>
+        </span>
+        SELARAS
+        <span class="brand-badge">ANALITIK</span>
+      </a>
+
+      <nav aria-label="Navigasi utama">
+        <ul class="nav-links">
+          <li><a href="/portal" class="nav-link">Antrean Kunjungan</a></li>
+          <li><a href="/forecast" class="nav-link active">Proyeksi Beban</a></li>
+          <li><a href="/crossdoc" class="nav-link">Nyandingan Dokumen</a></li>
+          <li><a href="/sandbox" class="nav-link">Sandbox Pola Fraud</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page-container">
+
+    <!-- Stat Ringkas -->
+    <section class="stat-block" style="padding: var(--space-32) var(--space-24); margin-bottom: var(--space-24);">
+      <div class="stat-block-label">
+        <span>PROYEKSI BEBAN KERJA ANTREAN PETUGAS — {{ fc.as_of }}</span>
+        <span class="badge badge-mint" style="background-color: rgba(46, 206, 160, 0.2); color: var(--color-mint-pulse); border-color: rgba(46, 206, 160, 0.4);">
+          HORIZON {{ fc.forecast | length }} HARI
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-20); align-items: end; margin-top: var(--space-12);">
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">
+            Kasus Baru Diharapkan
+          </div>
+          <div class="stat-numeral">{{ fc.expected_total }}</div>
+          <div style="font-size: 13px; color: var(--color-paper); opacity: 0.8; margin-top: 4px;">
+            Sumber baseline: {{ fc.baseline_source }} ({{ fc.baseline_cases_per_day }} kasus/hari)
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">
+            Kapasitas Pemeriksa Harian
+          </div>
+          <div style="font-family: var(--font-inter); font-size: 36px; font-weight: 600; color: var(--color-paper);">
+            {{ capacity_display }} <span style="font-size: 16px; font-weight: 400; opacity: 0.8;">kasus / hari</span>
+          </div>
+          <div style="font-size: 13px; color: var(--color-paper); opacity: 0.8; margin-top: 4px;">
+            Total kuota {{ fc.capacity.total_capacity_hours }} jam &middot; {{ fc.capacity.hours_per_visit }} jam per kunjungan
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size: var(--text-caption); text-transform: uppercase; letter-spacing: var(--tracking-caption); color: var(--color-soft-teal); margin-bottom: 4px;">
+            Rasio Kecukupan Antrean
+          </div>
+          {% if coverage_pct %}
+          <div style="font-family: var(--font-inter); font-size: 36px; font-weight: 600; color: var(--color-paper);">
+            {{ coverage_pct }}%
+          </div>
+          <div style="font-size: 13px; color: var(--color-paper); opacity: 0.8; margin-top: 4px;">
+            {% if fc.overloaded %}Kapasitas <strong style="color: var(--color-mint-pulse);">di bawah</strong> permintaan{% else %}Kapasitas cukup untuk horizon ini{% endif %}
+          </div>
+          {% else %}
+          <div style="font-family: var(--font-inter); font-size: 20px; font-weight: 600; color: var(--color-paper); padding-top: 12px;">
+            Tidak dapat dihitung (baseline 0)
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    {% if fc.overloaded %}
+    <div class="disclaimer-banner" style="border-color: var(--color-warning-border); background-color: var(--color-warning-bg);">
+      <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span>
+      <span style="color: var(--color-ink);">Permintaan kasus baru melebihi kapasitas pemeriksa harian pada horizon proyeksi. Pertimbangkan realokasi kuota petugas antarwilayah (skala prioritas otomatis planner).</span>
+    </div>
+    {% endif %}
+
+    <section class="card">
+      <div class="card-title-row">
+        <span class="card-title">
+          <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg></span>
+          Proyeksi Kasus Baru per Hari
+        </span>
+        <span class="badge badge-neutral">baseline {{ fc.baseline_cases_per_day }} case/d</span>
+      </div>
+
+      {% for row in rows %}
+        <div class="fc-day-row">
+          <div class="day-meta">
+            <div style="font-size: var(--text-small); font-weight: var(--font-semibold); color: var(--color-ink);">{{ row.weekday }}</div>
+            <div style="font-size: var(--text-caption); color: var(--color-slate);">{{ row.date }}</div>
+          </div>
+          <div class="fc-bar {% if row.over %}over{% endif %}" role="img" aria-label="Proyeksi {{ row.expected }} kasus">
+            <span style="width: {{ row.share_pct }}%;"></span>
+          </div>
+          <div class="fc-num">{{ row.expected }} kasus{% if row.over %} <span class="diff-tag-negative">melewati kapasitas</span>{% endif %}</div>
+        </div>
+      {% endfor %}
+    </section>
+
+    <section class="card">
+      <div class="card-title-row">
+        <span class="card-title">
+          <span aria-hidden="true" class="icon icon-sm"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"></path></svg></span>
+          Riwayat Kasus Baru
+        </span>
+        {% if fc.history %}<span class="badge badge-neutral">{{ fc.history | length }} hari berdata</span>{% endif %}
+      </div>
+      {% if fc.history %}
+        <div class="table-wrap">
+          <table class="table-triangulation">
+            <thead>
+              <tr><th>Tanggal</th><th class="col-numeric">Kasus Baru</th></tr>
+            </thead>
+            <tbody>
+              {% for h in fc.history %}
+              <tr><td>{{ h.date }}</td><td class="col-numeric">{{ h.count }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="font-size: var(--text-small); color: var(--color-slate);">
+          Belum ada riwayat kasus pada jendela proyeksi; proyeksi memakai baseline fallback rules.yaml ({{ fc.baseline_cases_per_day }} kasus/hari).
+        </p>
+      {% endif %}
+    </section>
+
+  </main>
+</body>
+</html>

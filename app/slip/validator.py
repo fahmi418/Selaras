@@ -9,13 +9,14 @@ After Gemini returns a PayslipExtraction, this module:
 
 from __future__ import annotations
 
+from app.config import get_rules
 from app.slip.schema import PayslipExtraction, ValidationResult
-
-_NET_TOLERANCE_PCT = 0.01   # 1% discrepancy is acceptable
-_CRITICAL_CONFIDENCE_THRESHOLD = 0.70
 
 
 def validate_extraction(extraction: PayslipExtraction) -> ValidationResult:
+    extraction_cfg = get_rules().extraction
+    net_tolerance_pct = float(extraction_cfg["net_tolerance_pct"])
+    critical_confidence = float(extraction_cfg["critical_confidence"])
     if not extraction.is_payslip:
         return ValidationResult(
             is_consistent=False,
@@ -39,14 +40,14 @@ def validate_extraction(extraction: PayslipExtraction) -> ValidationResult:
         reported_net = extraction.net_total.value
         if reported_net != 0:
             discrepancy_pct = abs(computed_net - reported_net) / abs(reported_net)
-            if discrepancy_pct > _NET_TOLERANCE_PCT:
+            if discrepancy_pct > net_tolerance_pct:
                 warnings.append(
                     f"Selisih total: dihitung Rp{computed_net:,} vs slip Rp{reported_net:,} "
                     f"({discrepancy_pct:.1%}). Mungkin ada komponen yang tidak terbaca."
                 )
 
     min_conf = extraction.min_confidence_critical()
-    if min_conf < _CRITICAL_CONFIDENCE_THRESHOLD:
+    if min_conf < critical_confidence:
         warnings.append(
             f"Confidence rendah pada field kritis ({min_conf:.0%}). Harap konfirmasi angka."
         )
